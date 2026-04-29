@@ -35,8 +35,14 @@ function normalizeText(value) {
 function toNodeLabel(node) {
     return `${node.title || node.type || "Node"}${node.id != null ? ` #${node.id}` : ""}`;
 }
-function buildGraphContext(workflow) {
+function buildGraphContext(workflow, prompt) {
     const nodes = workflow?.nodes ?? [];
+    const promptData = new Map(
+        Object.entries(prompt ?? {}).map(([k, v]) => [
+            isNaN(k) ? k : Number(k),
+            v
+        ])
+    );
     const subgraphs = workflow?.definitions?.subgraphs ?? [];
 
     // Сопоставляем внешнюю ноду-сабграф с её определением
@@ -61,10 +67,10 @@ function buildGraphContext(workflow) {
     }
 
     // ---------- 2. Внутренние узлы сабграфов ----------
-    for (const [, { sub }] of subgraphByNodeId.entries()) {
-        const prefix = `sub_${sub.id}_`;
-        if (sub.nodes) {
-            for (const innerNode of sub.nodes) {
+    for (const [, key] of subgraphByNodeId.entries()) {
+        const prefix = `${key.node.id}:`;
+        if (key.sub.nodes) {
+            for (const innerNode of key.sub.nodes) {
                 const newId = prefix + innerNode.id;
                 allNodes.push({ ...innerNode, id: newId });
                 idMap.set(String(innerNode.id), newId);
@@ -227,6 +233,7 @@ function buildGraphContext(workflow) {
 
     return {
         nodes: allNodes,
+        promptData,
         nodesById,
         normalLinks: filteredLinks,     // массив объектов связей
         incomingByNodeId,
@@ -360,7 +367,7 @@ function asumePrompt(widgetValue) {
         neg: Math.max(0, baseScore + negScore)
     };
 }
-function analyzeWidgets(node) {
+function analyzeWidgets(node, graphCtx) {
     const hints = {
         hasModel: false,
         hasPositive: false,
@@ -369,7 +376,10 @@ function analyzeWidgets(node) {
         hasGenParams: false,
         hasDimensions: false,
     };
-
+    const hasPromptData = graphCtx.promptData?.has(node.id);
+    const hasWidgetNames = hasPromptData ? (...names) =>
+        Object.keys(graphCtx.promptData.get(node.id).inputs)
+        ?.some(o => names.some(name => o.toLocaleLowerCase().includes(name))) : true;
     // Защита от нод без виджетов
     if (!node.widgets_values || !Array.isArray(node.widgets_values)) {
         return hints;
@@ -382,7 +392,6 @@ function analyzeWidgets(node) {
         if (typeof value === 'string' && /\.(safetensors|ckpt|pt|pth|sft)$/i.test(value)) {
             hints.hasModel = true;
         }
-
         // --- 2. Проверка на промпт ---
         if (positive >= 3 && positive > negative) {
             hints.hasPositive = true;
@@ -418,13 +427,25 @@ function analyzeWidgets(node) {
             hints.hasDimensions = true;
         }
     }
-
+    if (hasPromptData && hints.hasModel && !hasWidgetNames("ckpt", "checkpoint")) {
+        hints.hasModel = false;
+    }
     return hints;
 }
 function getStrictMatches(targetNode, activeNodes) {
     const nodes = activeNodes || [];
+    const normalizeId = (id) => {
+        if (typeof id === "number") return id;
+
+        if (typeof id === "string") {
+            const part = id.split(":").pop();
+            return Number(part);
+        }
+
+        return NaN;
+    };
     const exactMatches = nodes.filter(
-        (candidate) => candidate.id === targetNode.id && candidate.type === targetNode.type
+        (candidate) => normalizeId(candidate.id) === normalizeId(targetNode.id) && candidate.type === targetNode.type
     );
     if (exactMatches.length > 0) {
         return exactMatches;
@@ -440,7 +461,7 @@ function getNodeRole(node, graphCtx, options = {}) {
     const type = normalizeText(node.type);
     const title = normalizeText(node.title);
     const widgets = normalizeText(node.widgets_values) || [];
-    const widgetValues = analyzeWidgets(node);
+    const widgetValues = analyzeWidgets(node, graphCtx);
     const hasWidgetsStrings = node.widgets_values?.some(v => typeof v === "string" && v !== "");
     const hasOutLinks = node.outputs.some(o => o.links !== null && o.links.length);
     const downstream = getDownstreamSignals(node, graphCtx, 3);
@@ -462,9 +483,9 @@ function getNodeRole(node, graphCtx, options = {}) {
     if (type.includes("latent") || title.includes("latent") || hasLinkInputName("latent") && isLinkType("latent")) {
         return "latent_source";
     }
-    if (widgetsContain(".safetensors") &&
-        type.includes("model") ||
-        type.includes("checkpoin")
+    if (
+        widgetValues.hasModel ||
+        type.includes("checkpoint")
     ) {
         return "model_provider";
     }
@@ -737,10 +758,10 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
         return false;
     }
 
-    const { workflow } = await tryToGetWorkflowDataFromEvent(e);
+    const { workflow, prompt } = await tryToGetWorkflowDataFromEvent(e);
     if (!workflow) return false;
 
-    const graphCtx = buildGraphContext(workflow);
+    const graphCtx = buildGraphContext(workflow, prompt);
     const isActive = (n) => n.mode !== 4; // исключаем bypassed
     const activeNodes = graphCtx?.nodes.filter(isActive) ?? [];
 
