@@ -254,36 +254,69 @@ function getDownstreamSignals(startNode, graphCtx, maxDepth = 4) {
         modelPath: null,
         latentPath: null,
     };
+
     while (queue.length) {
         const current = queue.shift();
-        if (!current || current.depth >= maxDepth) {
+        if (!current || current.depth >= maxDepth) continue;
+
+        const currentNode = graphCtx.nodesById.get(current.nodeId);
+
+        // Если текущая нода bypassed – просто пробрасываем все её выходы, не анализируя сигналы
+        if (currentNode && currentNode.mode === 4) {
+            const outgoing = graphCtx.outgoingByNodeId.get(currentNode.id) || [];
+            for (const edge of outgoing) {
+                const targetNode = graphCtx.nodesById.get(edge.targetNodeId);
+                if (targetNode && !visited.has(edge.targetNodeId)) {
+                    visited.add(edge.targetNodeId);
+                    queue.push({
+                        nodeId: edge.targetNodeId,
+                        depth: current.depth + 1,
+                        path: [...current.path, edge.targetNodeId],
+                    });
+                }
+            }
             continue;
         }
-        const outgoing = graphCtx.outgoingByNodeId.get(current.nodeId) || [];
+
+        const outgoing = (graphCtx.outgoingByNodeId.get(current.nodeId) ?? [])
         for (const edge of outgoing) {
-            if (edge.targetInputName === "positive") {
+            const targetNode = graphCtx.nodesById.get(edge.targetNodeId);
+
+            // Если целевая нода bypassed – сразу проходим сквозь неё
+            if (targetNode && targetNode.mode === 4) {
+                if (!visited.has(edge.targetNodeId)) {
+                    visited.add(edge.targetNodeId);
+                    const bypassedOutgoing = graphCtx.outgoingByNodeId.get(edge.targetNodeId) || [];
+                    for (const bypassedEdge of bypassedOutgoing) {
+                        if (!visited.has(bypassedEdge.targetNodeId)) {
+                            visited.add(bypassedEdge.targetNodeId);
+                            queue.push({
+                                nodeId: bypassedEdge.targetNodeId,
+                                depth: current.depth + 1,
+                                path: [...current.path, edge.targetNodeId, bypassedEdge.targetNodeId],
+                            });
+                        }
+                    }
+                }
+                continue; // не проверяем сигналы для bypassed
+            }
+
+            // Обычная проверка для активных нод
+            if (edge.targetInputName === "positive" && edge.linktype === "CONDITIONING") {
                 signals.reachesPositive = true;
-                if (!signals.positivePath) {
-                    signals.positivePath = [...current.path, edge.targetNodeId];
-                }
+                if (!signals.positivePath) signals.positivePath = [...current.path, edge.targetNodeId];
             }
-            if (edge.targetInputName === "negative") {
+            if (edge.targetInputName === "negative" && edge.linktype === "CONDITIONING") {
                 signals.reachesNegative = true;
-                if (!signals.negativePath) {
-                    signals.negativePath = [...current.path, edge.targetNodeId];
-                }
+                if (!signals.negativePath) signals.negativePath = [...current.path, edge.targetNodeId];
             }
-            if (edge.targetInputName === "model" || edge.dataType === "MODEL") {
+            if (edge.targetInputName === "model" || edge.linktype === "MODEL") {
                 signals.reachesModel = true;
-                if (!signals.modelPath) {
-                    signals.modelPath = [...current.path, edge.targetNodeId];
-                }
+                if (!signals.modelPath) signals.modelPath = [...current.path, edge.targetNodeId];
             }
-            if (edge.targetInputName === "latent_image") {
+            if (edge.targetInputName === "latent_image" && edge.linktype === "LATENT") {
                 signals.reachesLatent = true;
-                if (!signals.latentPath) {
-                    signals.latentPath = [...current.path, edge.targetNodeId];
-                }
+                if (!signals.latentPath) signals.latentPath = [...current.path, edge.targetNodeId];
             }
             if (
                 (edge.targetType || "").includes("sampler") &&
@@ -293,6 +326,7 @@ function getDownstreamSignals(startNode, graphCtx, maxDepth = 4) {
             ) {
                 signals.reachesSampler = true;
             }
+
             if (!visited.has(edge.targetNodeId)) {
                 visited.add(edge.targetNodeId);
                 queue.push({
@@ -324,13 +358,14 @@ function asumePrompt(widgetValue) {
     if (/\([\w\s,.-]+:\d*\.?\d+\)/.test(text)) baseScore += 2;
     if (/\[[\w\s,.-]+\]/.test(text)) baseScore += 1;
     if (/\([\w\s,.-]+\)/.test(text)) baseScore += 1;
+    if (/\\\([\w\s]+\\\)/.test(text)) posScore += 2, negScore += 1;
 
     // Запятые
     const commaCount = (text.match(/,/g) || []).length;
     if (commaCount >= 3) baseScore += 2;
 
     // 2. Индикаторы ПОЗИТИВНОГО промпта
-    if (/<lora:[^:]+:\d*\.?\d+>/.test(text)) posScore += 3;
+    if (/<lora:[^:]+:\d*\.?\d+>/.test(text)) posScore += 1;
 
     const posMarkers = [
         'masterpiece', 'best quality', 'highres', 'painting',
@@ -370,6 +405,7 @@ function asumePrompt(widgetValue) {
 function analyzeWidgets(node, graphCtx) {
     const hints = {
         hasModel: false,
+        hasLora: false,
         hasPositive: false,
         hasNegative: false,
         hasPrompt: false,
@@ -392,6 +428,9 @@ function analyzeWidgets(node, graphCtx) {
         if (typeof value === 'string' && /\.(safetensors|ckpt|pt|pth|sft)$/i.test(value)) {
             hints.hasModel = true;
         }
+        if (typeof value === 'string' && /(\.safetensors|lora)/i.test(value)) {
+            hints.hasLora = true;
+        }
         // --- 2. Проверка на промпт ---
         if (positive >= 3 && positive > negative) {
             hints.hasPositive = true;
@@ -405,16 +444,16 @@ function analyzeWidgets(node, graphCtx) {
 
         // --- 3. Проверка на параметры генерации (seed, cfg, steps) ---
         // Seed обычно очень большое число
-        if (typeof value === 'number' && Number.isInteger(value) && value > 100000) {
-            hints.hasGenParams = true; // Скорее всего это seed
-        }
+        // if (typeof value === 'number' && Number.isInteger(value) && value > 100000) {
+        //     hints.hasGenParams = true; // Скорее всего это seed
+        // }
         // CFG обычно float от 1 до 30, Steps от 1 до 150
         // (определить их только по значению сложно, но можно проверять названия виджетов, если доступно node.widgets)
 
         // Поиск сэмплеров/скедулеров (строковые имена)
         if (typeof value === 'string') {
             const samplers = ['euler', 'euler_ancestral', 'dpmpp_2m', 'ddim', 'lms'];
-            const schedulers = ['normal', 'karras', 'exponential', 'sgm_uniform'];
+            const schedulers = ['normal', 'simple', 'karras', 'exponential', 'sgm_uniform', 'ddim'];
             if (samplers.includes(value.toLowerCase()) || schedulers.includes(value.toLowerCase())) {
                 hints.hasGenParams = true;
             }
@@ -427,8 +466,19 @@ function analyzeWidgets(node, graphCtx) {
             hints.hasDimensions = true;
         }
     }
-    if (hasPromptData && hints.hasModel && !hasWidgetNames("ckpt", "checkpoint")) {
-        hints.hasModel = false;
+    if (hasPromptData) {
+        if (hints.hasModel && !hasWidgetNames("ckpt", "checkpoint")) {
+            hints.hasModel = false;
+        }
+        if (hints.hasLora && !hasWidgetNames("lora")) {
+            hints.hasLora = false;
+        }
+        if (!hints.hasGenParams && hasWidgetNames("seed", "steps", "cfg", "sampler")) {
+            hints.hasGenParams = true;
+        }
+        if (hints.hasDimensions && !hasWidgetNames("height", "width")) {
+            hints.hasDimensions = false;
+        }
     }
     return hints;
 }
@@ -450,21 +500,20 @@ function getStrictMatches(targetNode, activeNodes) {
     if (exactMatches.length > 0) {
         return exactMatches;
     }
-    return nodes.filter((candidate) => candidate.type === targetNode.type);
+    return exactMatches; //nodes.filter((candidate) => candidate.type === targetNode.type);
 }
 function getNodeRole(node, graphCtx, options = {}) {
     const {
         allowEmptyWidgets = false,
-        allowLinkTracing = true,
+        allowLinkTracing = false,
         allowNoLinks = false,
     } = options;
     const type = normalizeText(node.type);
     const title = normalizeText(node.title);
-    const widgets = normalizeText(node.widgets_values) || [];
     const widgetValues = analyzeWidgets(node, graphCtx);
     const hasWidgetsStrings = node.widgets_values?.some(v => typeof v === "string" && v !== "");
     const hasOutLinks = node.outputs.some(o => o.links !== null && o.links.length);
-    const downstream = getDownstreamSignals(node, graphCtx, 3);
+    const downstream = getDownstreamSignals(node, graphCtx, 5);
     const nodeHasAnyKeyword = (keywords, ...fields) =>
         fields.some(v =>
             typeof v === "string" &&
@@ -473,16 +522,11 @@ function getNodeRole(node, graphCtx, options = {}) {
     const outStrings = node.outputs.flatMap(o =>
         [o.name, o.type, o.label].filter(v => typeof v === "string")
     );
-    const outgoing = graphCtx.outgoingByNodeId.get(node.id) || [];
-    const outLinkNames = outgoing.map((edge) => normalizeText(edge.targetInputName));//.concat(incoming.map((edge) => edge.targetInputName));
-    const outLinkTypes = outgoing.map((edge) => normalizeText(edge.linktype));
-    const hasLinkInputName = (name) => outLinkNames.includes(name);
+    const insStrings = node.inputs.flatMap(o =>
+        [o.name, o.type, o.label].filter(v => typeof v === "string")
+    );
     const hasWidget = (content) => JSON.stringify(node.widgets_values).toLowerCase().includes(content);
-    const isLinkType = (type) => outLinkTypes.includes(type);
-    const widgetsContain = (widget) => widgets.includes((widget));
-    if (type.includes("latent") || title.includes("latent") || hasLinkInputName("latent") && isLinkType("latent")) {
-        return "latent_source";
-    }
+    const params = ["seed", "steps", "cfg", "sampler"];
     if (
         widgetValues.hasModel ||
         type.includes("checkpoint")
@@ -490,8 +534,8 @@ function getNodeRole(node, graphCtx, options = {}) {
         return "model_provider";
     }
     if (
-        type.includes("lora") &&
-        hasWidget("lora")
+        widgetValues.hasLora &&
+        nodeHasAnyKeyword(["lora", "stack", "model"], ...outStrings)
     ) {
         return "lora_provider";
     }
@@ -557,8 +601,18 @@ function getNodeRole(node, graphCtx, options = {}) {
     ) {
         return "prompt_possible";
     }
-    if (type.includes("sampler")) {
+    if (
+        widgetValues.hasGenParams ||
+        downstream.reachesSampler &&
+        nodeHasAnyKeyword(params, title, ...insStrings, ...outStrings)
+    ) {
         return "sampler_params";
+    }
+    if (
+        nodeHasAnyKeyword(["latent"], type, title, ...outStrings) &&
+        widgetValues.hasDimensions
+    ) {
+        return "latent_source";
     }
 
     return "unknown";
@@ -760,7 +814,11 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
 
     const { workflow, prompt } = await tryToGetWorkflowDataFromEvent(e);
     if (!workflow) return false;
-
+    //const curentGraph = app.graph;
+    //const vGraph = new LiteGraph.LGraph();
+    //vGraph.configure(workflow);
+    //console.log(traceDownstream(node, vGraph));
+    //console.log("vGraph -->", vGraph.getNodeById(1883));
     const graphCtx = buildGraphContext(workflow, prompt);
     const isActive = (n) => n.mode !== 4; // исключаем bypassed
     const activeNodes = graphCtx?.nodes.filter(isActive) ?? [];
