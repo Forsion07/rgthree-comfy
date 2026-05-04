@@ -240,6 +240,71 @@ function buildGraphContext(workflow, prompt) {
         outgoingByNodeId,
     };
 }
+function buildRawGraphCtx(workflow, prompt) {
+    const promptData = new Map(
+        Object.entries(prompt ?? {}).map(([k, v]) => [
+            isNaN(k) ? k : Number(k),
+            v
+        ])
+    );
+    const nodes = workflow?.nodes ?? [];
+    const nodesById = new Map(workflow.nodes.map(n => [n.id, n]));
+    const normalizedLinks = workflow.links.map(l => Array.isArray(l) ?
+        { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] } :
+        { ...l });
+    const linksById = new Map(normalizedLinks.map(l => [l.id, l]));
+    const subs = workflow.definitions.subgraphs;
+    const subsById = new Map(workflow.definitions.subgraphs.map(s => [s.id, s]));
+    const subsNodes = subs.flatMap(n => n.nodes);
+    const subsLinks = subs.flatMap(l => l.links);
+    const subsNodesById = new Map(subsNodes.map(n => [n.id, n]));
+    const subsLinksById = new Map(subsLinks.map(l => [l.id, l]));
+    const subsProxyNodes = workflow.nodes.filter(n => subsById.has(n.type));
+    const subsProxyNodesById = new Map(subsProxyNodes.map(n => [n.id, n]));
+    const subsProxyNodesByType = new Map(subsProxyNodes.map(n => [n.type, n]));
+    const subgraphByNodeId = new Map();
+    for (const node of nodes) {
+        const sub = subs.find(sg => sg.id === node.type);
+        if (sub) {
+            subgraphByNodeId.set(node.id, { node, sub });
+        }
+    }
+    const allNodes = [];
+    const idMap = new Map();        // старый id узла → новый id
+    for (const node of nodes) {
+        if (subgraphByNodeId.has(node.id)) continue;
+        allNodes.push({ ...node });
+    }
+
+    // 2. Внутренние узлы сабграфов
+    for (const [, key] of subgraphByNodeId.entries()) {
+        const prefix = `${key.node.id}:`;
+        if (key.sub.nodes) {
+            for (const innerNode of key.sub.nodes) {
+                const newId = prefix + innerNode.id;
+                allNodes.push({ ...innerNode, id: newId });
+                idMap.set(String(innerNode.id), newId);
+            }
+        }
+    }
+    const allNodesById = new Map(allNodes.map(n => [n.id, n]));
+    const allActiveNodes = allNodes.filter(n => n.mode === 0);
+    return {
+        promptData,
+        nodes,
+        nodesById,
+        linksById,
+        subsById,
+        subsProxyNodes,
+        subsProxyNodesById,
+        subsProxyNodesByType,
+        subsNodes,
+        subsNodesById,
+        subsLinksById,
+        allNodesById,
+        allActiveNodes
+    }
+}
 function getDownstreamSignals(startNode, graphCtx, maxDepth = 4) {
     const queue = [{ nodeId: startNode.id, depth: 0, path: [startNode.id] }];
     const visited = new Set([startNode.id]);
@@ -339,6 +404,75 @@ function getDownstreamSignals(startNode, graphCtx, maxDepth = 4) {
     }
     return signals;
 }
+function enterSub(link, graphCtx) {
+    const subNode = graphCtx.subsProxyNodesById.get(link.target_id);
+    const sub = graphCtx.subsById.get(subNode.type);
+    const subNodeInputName = subNode.inputs[link.target_slot].name;
+    const entryLinks = sub.inputs.find(i => i.name === subNodeInputName).linkIds;
+    return entryLinks || [];
+}
+function exitSub(link, graphCtx) {
+    const sub = [...graphCtx.subsById.values()].find(s => s.links.includes(link));
+    const subNode = graphCtx.subsProxyNodesByType.get(sub.id);
+    const subOutputsMap = new Map(sub.outputs.map(o => [o.linkIds[0], o]));
+    const subOutputName = subOutputsMap.get(link.id).name;
+    const subNodeOutputsByName = new Map(subNode.outputs.map(o => [o.name, o]));
+    const exitLinks = subNodeOutputsByName.get(subOutputName).links;
+    return exitLinks || [];
+}
+function traceDownstream(startNode, graphCtx) {
+    //startNode = graphCtx.nodesById.get(startNode.id) ? graphCtx.subsNodesById.get(startNode.id) : {};
+    const queue = [startNode];
+    const visited = new Set([startNode.id]);
+    const allowedLinkTypes = ["CONDITIONING", "STRING", "MODEL", "LATENT", "INT", "FLOAT"];
+    const signals = {
+        reachesPositive: false,
+        reachesNegative: false,
+        reachesSampler: false,
+    };
+    while (queue.length > 0) {
+        const currentNode = queue.shift();
+        for (const output of currentNode.outputs) {
+            if (!output.links) continue;
+            const linksQueue = [...output.links];
+            for (const linkId of linksQueue) {
+                const link = graphCtx.linksById.get(linkId) ?? graphCtx.subsLinksById.get(linkId);
+                if (!link || !allowedLinkTypes.includes(link.type)) continue;
+                if (link.target_id === -20) {
+                    linksQueue.push(...exitSub(link, graphCtx));
+                    continue;
+                }
+                const targetNode = graphCtx.nodesById.get(link.target_id) ?? graphCtx.subsNodesById.get(link.target_id);
+                if (!targetNode) continue;
+                if (graphCtx.subsProxyNodesById.has(targetNode.id)) {
+                    linksQueue.push(...enterSub(link, graphCtx));
+                    continue;
+                }
+                const targetInput = targetNode.inputs[link.target_slot];
+                if (!targetInput) continue;
+                const inputName = (targetInput.name || "").toLowerCase();
+                const targetType = (targetNode.type || "").toLowerCase();
+                const currentLinkType = link.type;
+                if (targetNode.mode !== 4) {
+                    if (inputName.includes("positive") && currentLinkType === "CONDITIONING") {
+                        signals.reachesPositive = true;
+                    }
+                    if (inputName.includes("negative") && currentLinkType === "CONDITIONING") {
+                        signals.reachesNegative = true;
+                    }
+                    if (targetType.includes("sampler")) {
+                        signals.reachesSampler = true;
+                    }
+                }
+                if (!visited.has(targetNode.id)) {
+                    visited.add(targetNode.id);
+                    queue.push(targetNode);
+                }
+            }
+        }
+    }
+    return signals;
+}
 function asumePrompt(widgetValue) {
     // Возвращаем объект с нулями, если это не строка
     if (typeof widgetValue !== 'string') return { pos: 0, neg: 0 };
@@ -415,7 +549,7 @@ function analyzeWidgets(node, graphCtx) {
     const hasPromptData = graphCtx.promptData?.has(node.id);
     const hasWidgetNames = hasPromptData ? (...names) =>
         Object.keys(graphCtx.promptData.get(node.id).inputs)
-        ?.some(o => names.some(name => o.toLocaleLowerCase().includes(name))) : true;
+            ?.some(o => names.some(name => o.toLocaleLowerCase().includes(name))) : true;
     // Защита от нод без виджетов
     if (!node.widgets_values || !Array.isArray(node.widgets_values)) {
         return hints;
@@ -454,7 +588,7 @@ function analyzeWidgets(node, graphCtx) {
         if (typeof value === 'string') {
             const samplers = ['euler', 'euler_ancestral', 'dpmpp_2m', 'ddim', 'lms'];
             const schedulers = ['normal', 'simple', 'karras', 'exponential', 'sgm_uniform', 'ddim'];
-            if (samplers.includes(value.toLowerCase()) || schedulers.includes(value.toLowerCase())) {
+            if (/(euler|dpmpp|ddim|lms)/i.test(value) || /(normal|simple|karras|exponential|sgm|ddim)/i.test(value)) {
                 hints.hasGenParams = true;
             }
         }
@@ -482,8 +616,8 @@ function analyzeWidgets(node, graphCtx) {
     }
     return hints;
 }
-function getStrictMatches(targetNode, activeNodes) {
-    const nodes = activeNodes || [];
+function getStrictMatches(targetNode, graphCtx) {
+    const nodes = graphCtx.allActiveNodes;
     const normalizeId = (id) => {
         if (typeof id === "number") return id;
 
@@ -505,15 +639,25 @@ function getStrictMatches(targetNode, activeNodes) {
 function getNodeRole(node, graphCtx, options = {}) {
     const {
         allowEmptyWidgets = false,
-        allowLinkTracing = false,
+        allowLinkTracing = true,
         allowNoLinks = false,
     } = options;
+    let score = {
+        model: 0,
+        lora: 0,
+        positive: 0,
+        negative: 0,
+        prompt: 0,
+        samplerParams: 0,
+        latent: 0,
+    }
     const type = normalizeText(node.type);
     const title = normalizeText(node.title);
     const widgetValues = analyzeWidgets(node, graphCtx);
     const hasWidgetsStrings = node.widgets_values?.some(v => typeof v === "string" && v !== "");
     const hasOutLinks = node.outputs.some(o => o.links !== null && o.links.length);
-    const downstream = getDownstreamSignals(node, graphCtx, 5);
+    let downstream = { reachesPositive: false, reachesNegative: false };
+    if (allowLinkTracing) { downstream = traceDownstream(node, graphCtx) };
     const nodeHasAnyKeyword = (keywords, ...fields) =>
         fields.some(v =>
             typeof v === "string" &&
@@ -527,102 +671,53 @@ function getNodeRole(node, graphCtx, options = {}) {
     );
     const hasWidget = (content) => JSON.stringify(node.widgets_values).toLowerCase().includes(content);
     const params = ["seed", "steps", "cfg", "sampler"];
-    if (
-        widgetValues.hasModel ||
-        type.includes("checkpoint")
-    ) {
-        return "model_provider";
-    }
-    if (
-        widgetValues.hasLora &&
-        nodeHasAnyKeyword(["lora", "stack", "model"], ...outStrings)
-    ) {
-        return "lora_provider";
-    }
-    if (
-        (
-            allowNoLinks ||
-            hasOutLinks
-        ) &&
-        (
-            widgetValues.hasPositive ||
-            (
-                nodeHasAnyKeyword(["positive"], title, type, ...outStrings) &&
-                (
-                    allowEmptyWidgets ||
-                    hasWidgetsStrings
-                )
-            )
-        ) &&
-        (
-            !allowLinkTracing ||
-            downstream.reachesPositive
-        )
-    ) {
-        return "prompt_positive";
-    }
-    if (
-        (
-            allowNoLinks ||
-            hasOutLinks
-        ) &&
-        (
-            widgetValues.hasNegative ||
-            (
-                nodeHasAnyKeyword(["negative"], title, type, ...outStrings) &&
-                (
-                    allowEmptyWidgets ||
-                    hasWidgetsStrings
-                )
-            )
-        ) &&
-        (
-            !allowLinkTracing ||
-            downstream.reachesNegative
-        )
-    ) {
-        return "prompt_negative";
-    }
-    if (
-        (
-            allowNoLinks ||
-            hasOutLinks
-        ) &&
-        (
-            widgetValues.hasPrompt ||
-            nodeHasAnyKeyword(["prompt", "string", "text", "multiline"], type) &&
-            allowEmptyWidgets
-        ) &&
-        (
-            !allowLinkTracing ||
-            downstream.reachesNegative ||
-            downstream.reachesPositive
-        )
-    ) {
-        return "prompt_possible";
-    }
-    if (
-        widgetValues.hasGenParams ||
-        downstream.reachesSampler &&
-        nodeHasAnyKeyword(params, title, ...insStrings, ...outStrings)
-    ) {
-        return "sampler_params";
-    }
-    if (
-        nodeHasAnyKeyword(["latent"], type, title, ...outStrings) &&
-        widgetValues.hasDimensions
-    ) {
-        return "latent_source";
-    }
+
+    if (!allowNoLinks && !hasOutLinks) return "unknown";
+    if (!allowEmptyWidgets && !hasWidgetsStrings) return "unknown";
+
+    if (widgetValues.hasModel) score.model += 2;
+    if (downstream.reachesModel) score.model += 1;
+    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 1;
+
+    if (widgetValues.hasLora) score.lora += 1;
+    if (downstream.reachesModel) score.lora += 1;
+    if (nodeHasAnyKeyword(["lora"], title, type, ...outStrings)) score.lora += 2;
+
+    if (widgetValues.hasPositive) score.positive += 2;
+    if (downstream.reachesPositive) score.positive += 1;
+    if (nodeHasAnyKeyword(["positive"], title, type, ...outStrings)) score.positive += 1;
+
+    if (widgetValues.hasNegative) score.negative += 2;
+    if (downstream.reachesNegative) score.negative += 1;
+    if (nodeHasAnyKeyword(["negative"], title, type, ...outStrings)) score.negative += 1;
+
+    if (downstream.reachesPositive || downstream.reachesNegative) score.prompt += 1;
+    if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 1;
+
+    if (widgetValues.hasGenParams) score.samplerParams += 1;
+    if (downstream.reachesSampler) score.samplerParams += 1;
+    if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 1;
+
+    if (widgetValues.hasDimensions) score.latent += 1;
+    if (downstream.reachesSampler) score.latent += 1;
+    if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 1;
+
+    if (score.model >= 2 && score.model > score.lora) return "model_provider";
+    if (score.lora >= 2) return "lora_provider";
+    if (score.positive >= 2 && score.positive > score.negative) return "prompt_positive";
+    if (score.negative >= 2 && score.negative > score.positive) return "prompt_negative";
+    if (score.prompt >= 1) return "prompt_possible";
+    if (score.samplerParams >= 2) return "sampler_params";
+    if (score.latent >= 2) return "latent_source";
 
     return "unknown";
 }
-function getRoleMatches(targetNode, activeNodes, graphCtx) {
+function getRoleMatches(targetNode, graphCtx) {
     const options = {
-         allowEmptyWidgets: true,
-         allowLinkTracing: false,
-         allowNoLinks: true
-        };
+        allowEmptyWidgets: true,
+        allowLinkTracing: false,
+        allowNoLinks: true
+    };
     const targetRole = getNodeRole(targetNode, graphCtx, options);
 
     // Если роль не определена, вернуть пустой массив
@@ -631,7 +726,7 @@ function getRoleMatches(targetNode, activeNodes, graphCtx) {
     }
 
     // Базовое условие: роль кандидата должна совпадать
-    const candidateNodes = (activeNodes || []).filter(candidate => {
+    const candidateNodes = (graphCtx.allActiveNodes || []).filter(candidate => {
         const candidateRole = getNodeRole(candidate, graphCtx);
         if (candidateRole === targetRole) {
             return true;
@@ -640,8 +735,7 @@ function getRoleMatches(targetNode, activeNodes, graphCtx) {
         if (
             targetRole === "prompt_possible" &&
             (candidateRole === "prompt_positive" || candidateRole === "prompt_negative")
-        )
-        {
+        ) {
             return true;
         }
         return false;
@@ -814,18 +908,16 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
 
     const { workflow, prompt } = await tryToGetWorkflowDataFromEvent(e);
     if (!workflow) return false;
-    //const curentGraph = app.graph;
-    //const vGraph = new LiteGraph.LGraph();
-    //vGraph.configure(workflow);
-    //console.log(traceDownstream(node, vGraph));
-    //console.log("vGraph -->", vGraph.getNodeById(1883));
-    const graphCtx = buildGraphContext(workflow, prompt);
-    const isActive = (n) => n.mode !== 4; // исключаем bypassed
-    const activeNodes = graphCtx?.nodes.filter(isActive) ?? [];
+
+    //const graphCtx = buildGraphContext(workflow, prompt);
+    // const isActive = (n) => n.mode !== 4; // исключаем bypassed
+    // const activeNodes = graphCtx?.nodes.filter(isActive) ?? [];
+    const graphCtx = buildRawGraphCtx(workflow, prompt);
+
 
     // Шаг 1: получаем сырые совпадения
-    const strictMatches = getStrictMatches(node, activeNodes);
-    const roleMatches = getRoleMatches(node, activeNodes, graphCtx);
+    const strictMatches = getStrictMatches(node, graphCtx);
+    const roleMatches = getRoleMatches(node, graphCtx);
 
     // Вспомогательная: проверка, что у ноды есть непустые widgets_values
     const hasWidgetValues = (n) => Array.isArray(n.widgets_values) && n.widgets_values.length > 0;
