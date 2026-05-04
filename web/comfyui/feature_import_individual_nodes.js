@@ -253,10 +253,10 @@ function buildRawGraphCtx(workflow, prompt) {
         { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] } :
         { ...l });
     const linksById = new Map(normalizedLinks.map(l => [l.id, l]));
-    const subs = workflow.definitions.subgraphs;
-    const subsById = new Map(workflow.definitions.subgraphs.map(s => [s.id, s]));
-    const subsNodes = subs.flatMap(n => n.nodes);
-    const subsLinks = subs.flatMap(l => l.links);
+    const subs = workflow.definitions?.subgraphs || [];
+    const subsById = new Map(subs?.map(s => [s.id, s]));
+    const subsNodes = subs?.flatMap(n => n.nodes);
+    const subsLinks = subs?.flatMap(l => l.links);
     const subsNodesById = new Map(subsNodes.map(n => [n.id, n]));
     const subsLinksById = new Map(subsLinks.map(l => [l.id, l]));
     const subsProxyNodes = workflow.nodes.filter(n => subsById.has(n.type));
@@ -264,7 +264,7 @@ function buildRawGraphCtx(workflow, prompt) {
     const subsProxyNodesByType = new Map(subsProxyNodes.map(n => [n.type, n]));
     const subgraphByNodeId = new Map();
     for (const node of nodes) {
-        const sub = subs.find(sg => sg.id === node.type);
+        const sub = subs?.find(sg => sg.id === node.type);
         if (sub) {
             subgraphByNodeId.set(node.id, { node, sub });
         }
@@ -424,20 +424,39 @@ function traceDownstream(startNode, graphCtx) {
     //startNode = graphCtx.nodesById.get(startNode.id) ? graphCtx.subsNodesById.get(startNode.id) : {};
     const queue = [startNode];
     const visited = new Set([startNode.id]);
-    const allowedLinkTypes = ["CONDITIONING", "STRING", "MODEL", "LATENT", "INT", "FLOAT"];
+    const allowedLinkTypes = [
+        "CONDITIONING",
+        "STRING",
+        "MODEL",
+        "LATENT",
+        "INT",
+        "FLOAT",
+        "SIGMAS",
+        "SAMPLER",
+        "NOISE",
+    ];
+    const initialLinkTypes = startNode.outputs.flatMap(o => o.links && allowedLinkTypes.some(t => t === o.type) ? o.type : []);
+    const allowedPaths = initialLinkTypes.includes("STRING")
+        ? [...initialLinkTypes, "CONDITIONING"]
+        : initialLinkTypes;
     const signals = {
+        reachesSampler: false,
+        reachesModel: false,
         reachesPositive: false,
         reachesNegative: false,
-        reachesSampler: false,
+        reachesInt: false,
+        reachesFloat: false,
+        reachesLatent: false,
     };
+    if (!allowedPaths.length) return signals;
     while (queue.length > 0) {
         const currentNode = queue.shift();
         for (const output of currentNode.outputs) {
-            if (!output.links) continue;
+            if (!output.links || !allowedPaths.includes(output.type)) continue;
             const linksQueue = [...output.links];
             for (const linkId of linksQueue) {
                 const link = graphCtx.linksById.get(linkId) ?? graphCtx.subsLinksById.get(linkId);
-                if (!link || !allowedLinkTypes.includes(link.type)) continue;
+                if (!link) continue;
                 if (link.target_id === -20) {
                     linksQueue.push(...exitSub(link, graphCtx));
                     continue;
@@ -453,15 +472,25 @@ function traceDownstream(startNode, graphCtx) {
                 const inputName = (targetInput.name || "").toLowerCase();
                 const targetType = (targetNode.type || "").toLowerCase();
                 const currentLinkType = link.type;
-                if (targetNode.mode !== 4) {
+                if (targetNode.mode !== 4 && targetType.includes("sampler")) {
+                    signals.reachesSampler = true;
+                    if (inputName.includes("model") && currentLinkType === "MODEL") {
+                        signals.reachesModel = true;
+                    }
                     if (inputName.includes("positive") && currentLinkType === "CONDITIONING") {
                         signals.reachesPositive = true;
                     }
                     if (inputName.includes("negative") && currentLinkType === "CONDITIONING") {
                         signals.reachesNegative = true;
                     }
-                    if (targetType.includes("sampler")) {
-                        signals.reachesSampler = true;
+                    if (/(seed|steps)/.test(inputName) && currentLinkType === "INT") {
+                        signals.reachesInt = true;
+                    }
+                    if (inputName.includes("cfg") && currentLinkType === "FLOAT") {
+                        signals.reachesFloat = true;
+                    }
+                    if (inputName.includes("latent") && currentLinkType === "LATENT") {
+                        signals.reachesLatent = true;
                     }
                 }
                 if (!visited.has(targetNode.id)) {
@@ -588,7 +617,7 @@ function analyzeWidgets(node, graphCtx) {
         if (typeof value === 'string') {
             const samplers = ['euler', 'euler_ancestral', 'dpmpp_2m', 'ddim', 'lms'];
             const schedulers = ['normal', 'simple', 'karras', 'exponential', 'sgm_uniform', 'ddim'];
-            if (/(euler|dpmpp|ddim|lms)/i.test(value) || /(normal|simple|karras|exponential|sgm|ddim)/i.test(value)) {
+            if (/(euler|dpmpp|ddim_|lms|normal|simple|karras|exponential|sgm_|ddim_)/i.test(value) && !hints.hasPrompt) {
                 hints.hasGenParams = true;
             }
         }
@@ -607,7 +636,7 @@ function analyzeWidgets(node, graphCtx) {
         if (hints.hasLora && !hasWidgetNames("lora")) {
             hints.hasLora = false;
         }
-        if (!hints.hasGenParams && hasWidgetNames("seed", "steps", "cfg", "sampler")) {
+        if (!hints.hasGenParams && hasWidgetNames("seed", "steps", "cfg", "sampler", "scheduler")) {
             hints.hasGenParams = true;
         }
         if (hints.hasDimensions && !hasWidgetNames("height", "width")) {
@@ -643,11 +672,12 @@ function getNodeRole(node, graphCtx, options = {}) {
         allowNoLinks = false,
     } = options;
     let score = {
+        unknown: 0,
         model: 0,
         lora: 0,
+        prompt: 0,
         positive: 0,
         negative: 0,
-        prompt: 0,
         samplerParams: 0,
         latent: 0,
     }
@@ -670,47 +700,52 @@ function getNodeRole(node, graphCtx, options = {}) {
         [o.name, o.type, o.label].filter(v => typeof v === "string")
     );
     const hasWidget = (content) => JSON.stringify(node.widgets_values).toLowerCase().includes(content);
-    const params = ["seed", "steps", "cfg", "sampler"];
+    const params = ["seed", "steps", "cfg", "sampler", "scheduler", "noise"];
 
     if (!allowNoLinks && !hasOutLinks) return "unknown";
     if (!allowEmptyWidgets && !hasWidgetsStrings) return "unknown";
 
-    if (widgetValues.hasModel) score.model += 2;
+    if (widgetValues.hasModel) score.model += 4;
     if (downstream.reachesModel) score.model += 1;
-    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 1;
+    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 2;
 
-    if (widgetValues.hasLora) score.lora += 1;
+    if (widgetValues.hasLora) score.lora += 4;
     if (downstream.reachesModel) score.lora += 1;
     if (nodeHasAnyKeyword(["lora"], title, type, ...outStrings)) score.lora += 2;
 
-    if (widgetValues.hasPositive) score.positive += 2;
+    if (widgetValues.hasPositive) score.positive += 4;
     if (downstream.reachesPositive) score.positive += 1;
-    if (nodeHasAnyKeyword(["positive"], title, type, ...outStrings)) score.positive += 1;
+    if (nodeHasAnyKeyword(["positive"], title, type,)) score.positive += 4;
 
-    if (widgetValues.hasNegative) score.negative += 2;
+    if (widgetValues.hasNegative) score.negative += 4;
     if (downstream.reachesNegative) score.negative += 1;
-    if (nodeHasAnyKeyword(["negative"], title, type, ...outStrings)) score.negative += 1;
+    if (nodeHasAnyKeyword(["negative"], title, type,)) score.negative += 4;
 
-    if (downstream.reachesPositive || downstream.reachesNegative) score.prompt += 1;
-    if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 1;
+    if (score.positive === score.negative) score.prompt = score.positive;
+    if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 3;
 
-    if (widgetValues.hasGenParams) score.samplerParams += 1;
+    if (widgetValues.hasGenParams) score.samplerParams += 4;
     if (downstream.reachesSampler) score.samplerParams += 1;
-    if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 1;
+    if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 2;
 
     if (widgetValues.hasDimensions) score.latent += 1;
-    if (downstream.reachesSampler) score.latent += 1;
-    if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 1;
+    if (downstream.reachesLatent) score.latent += 2;
+    if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 2;
 
-    if (score.model >= 2 && score.model > score.lora) return "model_provider";
-    if (score.lora >= 2) return "lora_provider";
-    if (score.positive >= 2 && score.positive > score.negative) return "prompt_positive";
-    if (score.negative >= 2 && score.negative > score.positive) return "prompt_negative";
-    if (score.prompt >= 1) return "prompt_possible";
-    if (score.samplerParams >= 2) return "sampler_params";
-    if (score.latent >= 2) return "latent_source";
+    const role = Object.entries(score).reduce(
+        (max, curr) =>
+            curr[1] > max[1] && curr[1] >= 3 ? curr : max)[0];
+    return role;
 
-    return "unknown";
+    // if (score.model >= 3 && score.model > score.lora) return "model_provider";
+    // if (score.lora >= 3) return "lora_provider";
+    // if (score.positive >= 3 && score.positive > score.negative) return "prompt_positive";
+    // if (score.negative >= 3 && score.negative > score.positive) return "prompt_negative";
+    // if (score.prompt >= 1) return "prompt_possible";
+    // if (score.samplerParams >= 3) return "sampler_params";
+    // if (score.latent >= 3) return "latent_source";
+
+    // return "unknown";
 }
 function getRoleMatches(targetNode, graphCtx) {
     const options = {
@@ -733,8 +768,8 @@ function getRoleMatches(targetNode, graphCtx) {
         }
         // Для положительного/отрицательного промпта также принимаем possible
         if (
-            targetRole === "prompt_possible" &&
-            (candidateRole === "prompt_positive" || candidateRole === "prompt_negative")
+            targetRole === "prompt" &&
+            (candidateRole === "positive" || candidateRole === "negative")
         ) {
             return true;
         }
@@ -771,13 +806,13 @@ async function chooseNodeFromCandidates(candidates, e) {
         overlay.appendChild(title);
 
         const ROLE_COLORS = {
-            latent_source: "#ff66cc",
-            model_provider: "#a855f7",
-            lora_provider: "#55f7a8",
-            prompt_positive: "#22c55e",
-            prompt_negative: "#ef4444",
-            sampler_params: "#eab308",
-            prompt_possible: "#ea4208",
+            latent: "#ff66cc",
+            model: "#a855f7",
+            lora: "#55f7a8",
+            positive: "#22c55e",
+            negative: "#ef4444",
+            samplerParams: "#eab308",
+            prompt: "#ea4208",
             unknown: "#444"
         };
 
