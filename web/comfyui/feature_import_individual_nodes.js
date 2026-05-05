@@ -531,7 +531,7 @@ function asumePrompt(widgetValue) {
     if (/<lora:[^:]+:\d*\.?\d+>/.test(text)) posScore += 1;
 
     const posMarkers = [
-        'masterpiece', 'best quality', 'highres', 'painting',
+        'masterpiece', 'best quality', 'highres', 'painting', 'detailed',
         'realistic', '1girl', '1boy', '4k', '8k', 'raw photo', 'cinematic'
     ];
     for (const marker of posMarkers) {
@@ -718,6 +718,7 @@ function getNodeRole(node, graphCtx, options = {}) {
     if (nodeHasAnyKeyword(["negative"], title, type)) score.negative += 1;
 
     if (score.positive === score.negative) score.prompt = score.positive;
+    if (widgetValues.hasPrompt && !widgetValues.hasPositive && !widgetValues.hasNegative) score.prompt += 1;
     if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 1;
 
     if (widgetValues.hasGenParams) score.samplerParams += 1;
