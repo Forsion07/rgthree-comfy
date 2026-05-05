@@ -684,7 +684,7 @@ function getNodeRole(node, graphCtx, options = {}) {
     const type = normalizeText(node.type);
     const title = normalizeText(node.title);
     const widgetValues = analyzeWidgets(node, graphCtx);
-    const hasWidgetsStrings = node.widgets_values?.some(v => typeof v === "string" && v !== "");
+    const hasWidgetsStrings = node.widgets_values?.some(v => /[\w\d]/.test(v));
     const hasOutLinks = node.outputs.some(o => o.links !== null && o.links.length);
     let downstream = { reachesPositive: false, reachesNegative: false };
     if (allowLinkTracing) { downstream = traceDownstream(node, graphCtx) };
@@ -696,56 +696,42 @@ function getNodeRole(node, graphCtx, options = {}) {
     const outStrings = node.outputs.flatMap(o =>
         [o.name, o.type, o.label].filter(v => typeof v === "string")
     );
-    const insStrings = node.inputs.flatMap(o =>
-        [o.name, o.type, o.label].filter(v => typeof v === "string")
-    );
-    const hasWidget = (content) => JSON.stringify(node.widgets_values).toLowerCase().includes(content);
     const params = ["seed", "steps", "cfg", "sampler", "scheduler", "noise"];
 
     if (!allowNoLinks && !hasOutLinks) return "unknown";
     if (!allowEmptyWidgets && !hasWidgetsStrings) return "unknown";
 
-    if (widgetValues.hasModel) score.model += 4;
+    if (widgetValues.hasModel) score.model += 1;
     if (downstream.reachesModel) score.model += 1;
-    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 2;
+    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 1;
 
-    if (widgetValues.hasLora) score.lora += 4;
+    if (widgetValues.hasLora) score.lora += 1;
     if (downstream.reachesModel) score.lora += 1;
-    if (nodeHasAnyKeyword(["lora"], title, type, ...outStrings)) score.lora += 2;
+    if (nodeHasAnyKeyword(["lora"], title, type, ...outStrings)) score.lora += 1;
 
-    if (widgetValues.hasPositive) score.positive += 4;
+    if (widgetValues.hasPositive) score.positive += 1, score.prompt -= 1;
     if (downstream.reachesPositive) score.positive += 1;
-    if (nodeHasAnyKeyword(["positive"], title, type,)) score.positive += 4;
+    if (nodeHasAnyKeyword(["positive"], title, type)) score.positive += 1;
 
-    if (widgetValues.hasNegative) score.negative += 4;
+    if (widgetValues.hasNegative) score.negative += 1, score.prompt -= 1;
     if (downstream.reachesNegative) score.negative += 1;
-    if (nodeHasAnyKeyword(["negative"], title, type,)) score.negative += 4;
+    if (nodeHasAnyKeyword(["negative"], title, type)) score.negative += 1;
 
     if (score.positive === score.negative) score.prompt = score.positive;
-    if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 3;
+    if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 1;
 
-    if (widgetValues.hasGenParams) score.samplerParams += 4;
+    if (widgetValues.hasGenParams) score.samplerParams += 1;
     if (downstream.reachesSampler) score.samplerParams += 1;
-    if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 2;
+    if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 1;
 
     if (widgetValues.hasDimensions) score.latent += 1;
-    if (downstream.reachesLatent) score.latent += 2;
-    if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 2;
+    if (downstream.reachesLatent) score.latent += 1;
+    if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 1;
 
-    const role = Object.entries(score).reduce(
+    const result = Object.entries(score).reduce(
         (max, curr) =>
-            curr[1] > max[1] && curr[1] >= 3 ? curr : max)[0];
-    return role;
-
-    // if (score.model >= 3 && score.model > score.lora) return "model_provider";
-    // if (score.lora >= 3) return "lora_provider";
-    // if (score.positive >= 3 && score.positive > score.negative) return "prompt_positive";
-    // if (score.negative >= 3 && score.negative > score.positive) return "prompt_negative";
-    // if (score.prompt >= 1) return "prompt_possible";
-    // if (score.samplerParams >= 3) return "sampler_params";
-    // if (score.latent >= 3) return "latent_source";
-
-    // return "unknown";
+            curr[1] > max[1] ? curr : max);
+    return { role: result[0], score: result[1] };
 }
 function getRoleMatches(targetNode, graphCtx) {
     const options = {
@@ -753,7 +739,7 @@ function getRoleMatches(targetNode, graphCtx) {
         allowLinkTracing: false,
         allowNoLinks: true
     };
-    const targetRole = getNodeRole(targetNode, graphCtx, options);
+    const targetRole = getNodeRole(targetNode, graphCtx, options).role;
 
     // Если роль не определена, вернуть пустой массив
     if (!targetRole || targetRole === "unknown") {
@@ -762,7 +748,7 @@ function getRoleMatches(targetNode, graphCtx) {
 
     // Базовое условие: роль кандидата должна совпадать
     const candidateNodes = (graphCtx.allActiveNodes || []).filter(candidate => {
-        const candidateRole = getNodeRole(candidate, graphCtx);
+        const candidateRole = getNodeRole(candidate, graphCtx).role;
         if (candidateRole === targetRole) {
             return true;
         }
@@ -977,7 +963,8 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
     if (roleCandidates.length > 1) {
         const menuItems = roleCandidates.map(n => ({
             node: n,
-            role: getNodeRole(n, graphCtx)
+            role: getNodeRole(n, graphCtx).role,
+            score: getNodeRole(n, graphCtx).score
         }));
         const chosen = await chooseNodeFromCandidates(menuItems, e);
         if (chosen) {
@@ -991,7 +978,8 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
     if (strictCandidates.length > 1) {
         const menuItems = strictCandidates.map(n => ({
             node: n,
-            role: getNodeRole(n, graphCtx)
+            role: getNodeRole(n, graphCtx).role,
+            score: getNodeRole(n, graphCtx).score
         }));
         const chosen = await chooseNodeFromCandidates(menuItems, e);
         if (chosen) {
