@@ -29,9 +29,11 @@ export function importIndividualNodesInnerOnDragOver(node, e) {
     return ((((_a = node.widgets) === null || _a === void 0 ? void 0 : _a.length) && !!CONFIG_SERVICE.getFeatureValue("import_individual_nodes.enabled")) ||
         false);
 }
+
 function toNodeLabel(node) {
     return `${node.title || node.type || "Node"}${node.id != null ? ` #${node.id}` : ""}`;
 }
+
 function buildGraphCtx(workflow, prompt) {
     const promptData = new Map(
         Object.entries(prompt ?? {}).map(([k, v]) => [
@@ -95,6 +97,7 @@ function buildGraphCtx(workflow, prompt) {
         allActiveNodes
     }
 }
+
 function enterSub(link, graphCtx) {
     const subNode = graphCtx.subsProxyNodesById.get(link.target_id);
     const sub = graphCtx.subsById.get(subNode.type);
@@ -102,6 +105,7 @@ function enterSub(link, graphCtx) {
     const entryLinks = sub.inputs.find(i => i.name === subNodeInputName).linkIds;
     return entryLinks || [];
 }
+
 function exitSub(link, graphCtx) {
     const sub = [...graphCtx.subsById.values()].find(s => s.links.includes(link));
     const subNode = graphCtx.subsProxyNodesByType.get(sub.id);
@@ -111,8 +115,8 @@ function exitSub(link, graphCtx) {
     const exitLinks = subNodeOutputsByName.get(subOutputName).links;
     return exitLinks || [];
 }
+
 function getDownstreamSignals(startNode, graphCtx) {
-    //startNode = graphCtx.nodesById.get(startNode.id) ? graphCtx.subsNodesById.get(startNode.id) : {};
     const queue = [startNode];
     const visited = new Set([startNode.id]);
     const allowedLinkTypes = [
@@ -193,34 +197,22 @@ function getDownstreamSignals(startNode, graphCtx) {
     }
     return signals;
 }
+
 function asumePrompt(widgetValue) {
-    // Возвращаем объект с нулями, если это не строка
     if (typeof widgetValue !== 'string') return { pos: 0, neg: 0 };
-
     const text = widgetValue.toLowerCase();
-
-    // Базовый скор (то, что присуще ЛЮБОМУ промпту: длина, запятые, веса)
     let baseScore = 0;
     let posScore = 0;
     let negScore = 0;
-
-    // 1. Базовые проверки синтаксиса
     if (text.length > 15) baseScore += 1;
     if (text.length > 50) baseScore += 1;
-
-    // Синтаксис весов (бывает и там, и там, но это точно промпт)
     if (/\([\w\s,.-]+:\d*\.?\d+\)/.test(text)) baseScore += 2;
     if (/\[[\w\s,.-]+\]/.test(text)) baseScore += 1;
     if (/\([\w\s,.-]+\)/.test(text)) baseScore += 1;
     if (/\\\([\w\s]+\\\)/.test(text)) posScore += 2, negScore += 1;
-
-    // Запятые
     const commaCount = (text.match(/,/g) || []).length;
     if (commaCount >= 3) baseScore += 2;
-
-    // 2. Индикаторы ПОЗИТИВНОГО промпта
     if (/<lora:[^:]+:\d*\.?\d+>/.test(text)) posScore += 1;
-
     const posMarkers = [
         'masterpiece', 'best quality', 'highres', 'painting', 'detailed',
         'realistic', '1girl', '1boy', '4k', '8k', 'raw photo', 'cinematic'
@@ -228,8 +220,6 @@ function asumePrompt(widgetValue) {
     for (const marker of posMarkers) {
         if (text.includes(marker)) posScore += 1;
     }
-
-    // 3. Индикаторы НЕГАТИВНОГО промпта
     const negMarkers = [
         'worst quality', 'lowres', 'bad quality', 'low quality', 'normal quality',
         'bad anatomy', 'bad hands', 'missing fingers', 'extra digit', 'fewer digits',
@@ -237,25 +227,19 @@ function asumePrompt(widgetValue) {
         'cropped', 'watermark', 'signature', 'text', 'username', 'jpeg artifacts', 'blurry'
     ];
     for (const marker of negMarkers) {
-        // Даем больший вес негативным маркерам, так как они очень специфичны
-        if (text.includes(marker)) negScore += 2;
+        if (text.includes(marker)) negScore += 1;
     }
-
-    // Проверка на частые негативные эмбеддинги
     if (text.includes('easynegative') || text.includes('badhand')) negScore += 3;
     if (/embedding:.*(neg|bad).*/.test(text)) negScore += 2;
-
-    // 4. Пенальти (если это JSON или путь к файлу)
     if (text.includes('{') && text.includes('}')) baseScore -= 5;
     if (/^[a-zA-Z0-9_/\\]+\.(safetensors|ckpt|pt|pth|bin)$/i.test(text)) baseScore -= 5;
 
-    // 5. Итоговый подсчет
-    // Прибавляем базовый скор (уверенность, что это вообще промпт) к полярностям
     return {
         pos: Math.max(0, baseScore + posScore),
         neg: Math.max(0, baseScore + negScore)
     };
 }
+
 function analyzeWidgets(node, graphCtx) {
     const hints = {
         hasModel: false,
@@ -270,22 +254,19 @@ function analyzeWidgets(node, graphCtx) {
     const hasWidgetNames = hasPromptData ? (...names) =>
         Object.keys(graphCtx.promptData.get(node.id).inputs)
             ?.some(o => names.some(name => o.toLocaleLowerCase().includes(name))) : true;
-    // Защита от нод без виджетов
     if (!node.widgets_values || !Array.isArray(node.widgets_values)) {
         return hints;
     }
-
     for (const value of node.widgets_values) {
         const positive = asumePrompt(value).pos;
         const negative = asumePrompt(value).neg;
-        // --- 1. Проверка на модели ---
         if (typeof value === 'string' && /\.(safetensors|ckpt|pt|pth|sft)$/i.test(value)) {
             hints.hasModel = true;
         }
         if (typeof value === 'string' && /(\.safetensors|lora)/i.test(value)) {
             hints.hasLora = true;
         }
-        // --- 2. Проверка на промпт ---
+
         if (positive >= 3 && positive > negative) {
             hints.hasPositive = true;
         }
@@ -296,15 +277,6 @@ function analyzeWidgets(node, graphCtx) {
             hints.hasPrompt = true;
         }
 
-        // --- 3. Проверка на параметры генерации (seed, cfg, steps) ---
-        // Seed обычно очень большое число
-        // if (typeof value === 'number' && Number.isInteger(value) && value > 100000) {
-        //     hints.hasGenParams = true; // Скорее всего это seed
-        // }
-        // CFG обычно float от 1 до 30, Steps от 1 до 150
-        // (определить их только по значению сложно, но можно проверять названия виджетов, если доступно node.widgets)
-
-        // Поиск сэмплеров/скедулеров (строковые имена)
         if (typeof value === 'string') {
             const samplers = ['euler', 'euler_ancestral', 'dpmpp_2m', 'ddim', 'lms'];
             const schedulers = ['normal', 'simple', 'karras', 'exponential', 'sgm_uniform', 'ddim'];
@@ -313,8 +285,6 @@ function analyzeWidgets(node, graphCtx) {
             }
         }
 
-        // --- 4. Проверка на габариты (Dimensions) ---
-        // Стандартные разрешения или просто числа кратные 8 (обычно от 256 до 4096)
         if (typeof value === 'number' && Number.isInteger(value) && value >= 256 && value <= 4096 && value % 8 === 0) {
             // Чтобы не спутать с seed или шагами
             hints.hasDimensions = true;
@@ -336,16 +306,15 @@ function analyzeWidgets(node, graphCtx) {
     }
     return hints;
 }
+
 function getStrictMatches(targetNode, graphCtx) {
     const nodes = graphCtx.allActiveNodes;
     const normalizeId = (id) => {
         if (typeof id === "number") return id;
-
         if (typeof id === "string") {
             const part = id.split(":").pop();
             return Number(part);
         }
-
         return NaN;
     };
     const exactMatches = nodes.filter(
@@ -354,7 +323,7 @@ function getStrictMatches(targetNode, graphCtx) {
     if (exactMatches.length > 0) {
         return exactMatches;
     }
-    return exactMatches; //nodes.filter((candidate) => candidate.type === targetNode.type);
+    return exactMatches;
 }
 function getNodeRole(node, graphCtx, options = {}) {
     const {
@@ -400,15 +369,14 @@ function getNodeRole(node, graphCtx, options = {}) {
     if (downstream.reachesModel) score.lora += 1;
     if (nodeHasAnyKeyword(["lora"], title, type, ...outStrings)) score.lora += 1;
 
-    if (widgetValues.hasPositive) score.positive += 1, score.prompt -= 1;
+    if (widgetValues.hasPositive) { score.positive += 1, score.prompt -= 1 } else score.positive -= 1;
     if (downstream.reachesPositive) score.positive += 1;
-    if (nodeHasAnyKeyword(["positive"], title, type, ...outStrings)) score.positive += 1;
+    if (nodeHasAnyKeyword(["positive"], title, type)) score.positive += 3;
 
-    if (widgetValues.hasNegative) score.negative += 1, score.prompt -= 1;
+    if (widgetValues.hasNegative) { score.negative += 1, score.prompt -= 1 } else score.negative -= 1;
     if (downstream.reachesNegative) score.negative += 1;
-    if (nodeHasAnyKeyword(["negative"], title, type, ...outStrings)) score.negative += 1;
+    if (nodeHasAnyKeyword(["negative"], title, type)) score.negative += 3;
 
-    if (score.positive === score.negative) score.prompt = score.positive;
     if (widgetValues.hasPrompt && !widgetValues.hasPositive && !widgetValues.hasNegative) score.prompt += 1;
     if (nodeHasAnyKeyword(["string", "conditioning", "prompt"], title, type)) score.prompt += 1;
 
@@ -416,7 +384,7 @@ function getNodeRole(node, graphCtx, options = {}) {
     if (downstream.reachesSampler) score.samplerParams += 1;
     if (nodeHasAnyKeyword(params, title, type)) score.samplerParams += 1;
 
-    if (widgetValues.hasDimensions) score.latent += 1;
+    if (widgetValues.hasDimensions) { score.latent += 1 } else score.latent -= 1;
     if (downstream.reachesLatent) score.latent += 1;
     if (nodeHasAnyKeyword(["latent"], title, type, ...outStrings)) score.latent += 1;
 
@@ -432,19 +400,14 @@ function getRoleMatches(targetNode, graphCtx) {
         allowNoLinks: true
     };
     const targetRole = getNodeRole(targetNode, graphCtx, options).role;
-
-    // Если роль не определена, вернуть пустой массив
     if (!targetRole || targetRole === "unknown") {
         return [];
     }
-
-    // Базовое условие: роль кандидата должна совпадать
     const candidateNodes = (graphCtx.allActiveNodes || []).filter(candidate => {
         const candidateRole = getNodeRole(candidate, graphCtx).role;
         if (candidateRole === targetRole) {
             return true;
         }
-        // Для положительного/отрицательного промпта также принимаем possible
         if (
             targetRole === "prompt" &&
             (candidateRole === "positive" || candidateRole === "negative")
@@ -456,11 +419,11 @@ function getRoleMatches(targetNode, graphCtx) {
 
     return candidateNodes;
 }
+
 async function chooseNodeFromCandidates(candidates, e) {
     return new Promise((resolve) => {
         const existing = document.getElementById("rgthree-primitive-import-menu");
         if (existing) existing.remove();
-
         const overlay = document.createElement("div");
         overlay.id = "rgthree-primitive-import-menu";
         overlay.style.position = "fixed";
@@ -475,14 +438,12 @@ async function chooseNodeFromCandidates(candidates, e) {
         overlay.style.borderRadius = "8px";
         overlay.style.boxShadow = "0 8px 24px rgba(0,0,0,.35)";
         overlay.style.padding = "8px";
-
         const title = document.createElement("div");
         title.textContent = "[rgthree-comfy] Select node to import values from";
         title.style.color = "#ddd";
         title.style.fontSize = "12px";
         title.style.marginBottom = "6px";
         overlay.appendChild(title);
-
         const ROLE_COLORS = {
             latent: "#ff66cc",
             model: "#a855f7",
@@ -493,21 +454,18 @@ async function chooseNodeFromCandidates(candidates, e) {
             prompt: "#ea4208",
             unknown: "#444"
         };
-
         const closeMenu = (selectedNode) => {
             window.removeEventListener("mousedown", onOutsideClick, true);
             window.removeEventListener("keydown", onKeydown, true);
             overlay.remove();
             resolve(selectedNode);
         };
-
         const onOutsideClick = (evt) => {
             if (!overlay.contains(evt.target)) closeMenu(null);
         };
         const onKeydown = (evt) => {
             if (evt.key === "Escape") closeMenu(null);
         };
-
         for (const { node, role, score } of candidates) {
             const container = document.createElement("button");
             container.type = "button";
@@ -523,22 +481,17 @@ async function chooseNodeFromCandidates(candidates, e) {
             container.style.borderRadius = "6px";
             container.style.cursor = "pointer";
             container.style.fontFamily = "monospace";
-
-            // Заголовок: имя ноды и роль
             const header = document.createElement("div");
             header.style.fontWeight = "bold";
             header.style.marginBottom = "4px";
             header.textContent = `${toNodeLabel(node)} [${role}]-${score}`;
             container.appendChild(header);
-
-            // Список непустых значений виджетов
             const values = node.widgets_values || [];
             const widgetList = document.createElement("div");
             widgetList.style.fontSize = "11px";
             widgetList.style.maxHeight = "120px";
             widgetList.style.overflow = "auto";
             widgetList.style.marginBottom = "4px";
-
             let hasWidgets = false;
             for (let i = 0; i < values.length; i++) {
                 const val = values[i];
@@ -557,11 +510,9 @@ async function chooseNodeFromCandidates(candidates, e) {
                 widgetList.textContent = "(no widget values)";
             }
             container.appendChild(widgetList);
-
             container.addEventListener("click", () => closeMenu(node));
             overlay.appendChild(container);
         }
-
         const cancel = document.createElement("button");
         cancel.type = "button";
         cancel.textContent = "Cancel";
@@ -575,7 +526,6 @@ async function chooseNodeFromCandidates(candidates, e) {
         cancel.style.cursor = "pointer";
         cancel.addEventListener("click", () => closeMenu(null));
         overlay.appendChild(cancel);
-
         document.body.appendChild(overlay);
         setTimeout(() => {
             window.addEventListener("mousedown", onOutsideClick, true);
@@ -583,16 +533,14 @@ async function chooseNodeFromCandidates(candidates, e) {
         }, 0);
     });
 }
+
 function applyCandidateToNode(targetNode, candidateNode) {
     const next = [...(targetNode.widgets_values || [])];
     const incoming = candidateNode?.widgets_values || [];
-
     for (let i = 0; i < incoming.length; i++) {
-        // массивы заменяем полностью
         if (Array.isArray(next[i]) && Array.isArray(incoming[i])) {
-            next[i] = [...incoming[i]]; // или просто incoming[i], если не боимся мутаций
+            next[i] = [...incoming[i]];
         }
-        // обычные объекты (не массивы) — сливаем
         else if (
             typeof next[i] === "object" && next[i] !== null &&
             typeof incoming[i] === "object" && incoming[i] !== null &&
@@ -600,20 +548,17 @@ function applyCandidateToNode(targetNode, candidateNode) {
         ) {
             next[i] = { ...next[i], ...incoming[i] };
         }
-        // всё остальное — просто перезаписываем
         else {
             next[i] = incoming[i];
         }
     }
-
-    // обрезаем лишние виджеты, если у target их было больше
     next.length = incoming.length;
-
     targetNode.configure({
         title: targetNode.title,
         widgets_values: next
     });
 }
+
 export async function importIndividualNodesInnerOnDragDrop(node, e) {
     if (!node.widgets?.length || !CONFIG_SERVICE.getFeatureValue("import_individual_nodes.enabled")) {
         return false;
@@ -621,25 +566,19 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
     const { workflow, prompt } = await tryToGetWorkflowDataFromEvent(e);
     if (!workflow) return false;
     const graphCtx = buildGraphCtx(workflow, prompt);
-    // Шаг 1: получаем сырые совпадения
     const strictMatches = getStrictMatches(node, graphCtx);
     const roleMatches = getRoleMatches(node, graphCtx);
-    // Вспомогательная: проверка, что у ноды есть непустые widgets_values
     const hasWidgetValues = (n) => Array.isArray(n.widgets_values) && n.widgets_values.length > 0;
-    // Очищаем оба массива от нод без значений
     const strictCandidates = strictMatches.filter(hasWidgetValues);
     const roleCandidates = roleMatches.filter(hasWidgetValues);
-    // Шаг 2: применяем strict-кандидата, если он единственный
     if (strictCandidates.length === 1) {
         applyCandidateToNode(node, strictCandidates[0]);
         return true;
     }
-    // Шаг 3: применяем role-кандидата, если он единственный (и нет strict с length 1)
     if (roleCandidates.length === 1) {
         applyCandidateToNode(node, roleCandidates[0]);
         return true;
     }
-    // Шаг 4: если есть несколько role-кандидатов – показываем меню с ними
     if (roleCandidates.length > 1) {
         const menuItems = roleCandidates.map(n => ({
             node: n,
@@ -651,9 +590,8 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
             applyCandidateToNode(node, chosen);
             return true;
         }
-        return false; // пользователь отменил
+        return false;
     }
-    // Шаг 5: если role-кандидатов нет, но есть несколько strict-кандидатов – показываем меню с ними
     if (strictCandidates.length > 1) {
         const menuItems = strictCandidates.map(n => ({
             node: n,
@@ -667,6 +605,5 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
         }
         return false;
     }
-    // Во всех остальных случаях (нет кандидатов) даём стандартному поведению сработать
     return true;
 }
