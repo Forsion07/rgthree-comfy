@@ -29,218 +29,10 @@ export function importIndividualNodesInnerOnDragOver(node, e) {
     return ((((_a = node.widgets) === null || _a === void 0 ? void 0 : _a.length) && !!CONFIG_SERVICE.getFeatureValue("import_individual_nodes.enabled")) ||
         false);
 }
-function normalizeText(value) {
-    return `${value !== null && value !== void 0 ? value : ""}`.trim().toLowerCase();
-}
 function toNodeLabel(node) {
     return `${node.title || node.type || "Node"}${node.id != null ? ` #${node.id}` : ""}`;
 }
-function buildGraphContext(workflow, prompt) {
-    const nodes = workflow?.nodes ?? [];
-    const promptData = new Map(
-        Object.entries(prompt ?? {}).map(([k, v]) => [
-            isNaN(k) ? k : Number(k),
-            v
-        ])
-    );
-    const subgraphs = workflow?.definitions?.subgraphs ?? [];
-
-    // Сопоставляем внешнюю ноду-сабграф с её определением
-    const subgraphByNodeId = new Map();
-    for (const node of nodes) {
-        const sub = subgraphs.find(sg => sg.id === node.type);
-        if (sub) {
-            subgraphByNodeId.set(node.id, { node, sub });
-        }
-    }
-
-    const allNodes = [];
-    const allLinks = []; // итоговые объекты связей
-
-    const idMap = new Map();        // старый id узла → новый id (внутренние ноды)
-    const linkIdRemap = new Map();  // старый id связи → новый id связи
-
-    // ---------- 1. Внешние узлы (не сабграфы) ----------
-    for (const node of nodes) {
-        if (subgraphByNodeId.has(node.id)) continue;
-        allNodes.push({ ...node });
-    }
-
-    // ---------- 2. Внутренние узлы сабграфов ----------
-    for (const [, key] of subgraphByNodeId.entries()) {
-        const prefix = `${key.node.id}:`;
-        if (key.sub.nodes) {
-            for (const innerNode of key.sub.nodes) {
-                const newId = prefix + innerNode.id;
-                allNodes.push({ ...innerNode, id: newId });
-                idMap.set(String(innerNode.id), newId);
-            }
-        }
-    }
-
-    // ---------- 3. Обработка внешних связей с перенаправлением ----------
-    const externalLinks = Array.isArray(workflow?.links) ? workflow.links : [];
-    const allIds = [...allLinks.map(l => l.id), ...externalLinks.map(l => l[0])];
-    let nextLinkId = Math.max(...allIds, 0) + 1;
-
-    for (const rawLink of externalLinks) {
-        if (!Array.isArray(rawLink) || rawLink.length < 5) continue;
-
-        const linkObj = {
-            id: rawLink[0],
-            origin_id: rawLink[1],
-            origin_slot: rawLink[2],
-            target_id: rawLink[3],
-            target_slot: rawLink[4],
-            type: rawLink[5],
-        };
-
-        const originIsSubgraph = subgraphByNodeId.has(linkObj.origin_id);
-        const targetIsSubgraph = subgraphByNodeId.has(linkObj.target_id);
-
-        // Если оба конца — не сабграфы, просто добавляем
-        if (!originIsSubgraph && !targetIsSubgraph) {
-            allLinks.push(linkObj);
-            continue;
-        }
-
-        // Собираем внутренние связи для origin (выход из сабграфа)
-        let originInnerLinks = [];
-        if (originIsSubgraph) {
-            const { sub } = subgraphByNodeId.get(linkObj.origin_id);
-            originInnerLinks = (sub.links || []).filter(l => {
-                const tId = Array.isArray(l) ? l[3] : l.target_id;
-                const tSlot = Array.isArray(l) ? l[4] : l.target_slot;
-                return tId === -20 && tSlot === linkObj.origin_slot;
-            }).map(l => Array.isArray(l) ? { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] } : { ...l });
-            if (originInnerLinks.length === 0) continue;
-        } else {
-            // Если origin не сабграф, создаём один фиктивный внутренний линк для унификации
-            originInnerLinks = [linkObj];
-        }
-
-        // Собираем внутренние связи для target (вход в сабграф)
-        let targetInnerLinks = [];
-        if (targetIsSubgraph) {
-            const { sub } = subgraphByNodeId.get(linkObj.target_id);
-            targetInnerLinks = (sub.links || []).filter(l => {
-                const oId = Array.isArray(l) ? l[1] : l.origin_id;
-                const oSlot = Array.isArray(l) ? l[2] : l.origin_slot;
-                return oId === -10 && oSlot === linkObj.target_slot;
-            }).map(l => Array.isArray(l) ? { id: l[0], origin_id: l[1], origin_slot: l[2], target_id: l[3], target_slot: l[4], type: l[5] } : { ...l });
-            if (targetInnerLinks.length === 0) continue;
-        } else {
-            targetInnerLinks = [linkObj];
-        }
-
-        // Декартово произведение: для каждой комбинации создаём уникальную связь
-        for (const oLink of originInnerLinks) {
-            for (const tLink of targetInnerLinks) {
-                const newId = nextLinkId++;
-                const resolved = {
-                    id: newId,
-                    origin_id: originIsSubgraph ? (idMap.get(String(oLink.origin_id)) ?? oLink.origin_id) : linkObj.origin_id,
-                    origin_slot: originIsSubgraph ? oLink.origin_slot : linkObj.origin_slot,
-                    target_id: targetIsSubgraph ? (idMap.get(String(tLink.target_id)) ?? tLink.target_id) : linkObj.target_id,
-                    target_slot: targetIsSubgraph ? tLink.target_slot : linkObj.target_slot,
-                    type: originIsSubgraph ? oLink.type : tLink.type, // предпочитаем тип из сабграфа, если есть
-                };
-
-                if (originIsSubgraph && targetIsSubgraph) {
-                    resolved.type = oLink.type; // или tLink.type, они должны совпадать
-                }
-
-                allLinks.push(resolved);
-
-                // Маппим старые внутренние id на новый
-                if (originIsSubgraph) linkIdRemap.set(oLink.id, newId);
-                if (targetIsSubgraph) linkIdRemap.set(tLink.id, newId);
-            }
-        }
-    }
-
-    // ---------- 4. Добавляем внутренние связи сабграфов, не затронутые перенаправлением ----------
-    for (const [, { sub }] of subgraphByNodeId.entries()) {
-        if (!sub.links) continue;
-        for (const rawLink of sub.links) {
-            const link = Array.isArray(rawLink)
-                ? { id: rawLink[0], origin_id: rawLink[1], origin_slot: rawLink[2], target_id: rawLink[3], target_slot: rawLink[4], type: rawLink[5] }
-                : { ...rawLink };
-
-            // Пропускаем связи, которые уже были заменены внешними
-            if (linkIdRemap.has(link.id)) continue;
-
-            // Заменяем id узлов, если они переехали
-            if (idMap.has(String(link.origin_id))) link.origin_id = idMap.get(String(link.origin_id));
-            if (idMap.has(String(link.target_id))) link.target_id = idMap.get(String(link.target_id));
-
-            // Пропускаем всё ещё фиктивные связи
-            if (link.origin_id === -10 || link.target_id === -20) continue;
-
-            allLinks.push(link);
-        }
-    }
-
-    // ---------- 5. Удаляем связи с -10/-20 (на всякий случай, если что-то проскользнуло) ----------
-    const filteredLinks = allLinks.filter(link => link.origin_id !== -10 && link.target_id !== -20);
-
-    // ---------- 6. Обновляем ссылки в inputs/outputs нод ----------
-    for (const node of allNodes) {
-        if (node.outputs) {
-            for (const output of node.outputs) {
-                if (Array.isArray(output.links)) {
-                    output.links = output.links.map(lid => linkIdRemap.get(lid) ?? lid);
-                }
-            }
-        }
-        if (node.inputs) {
-            for (const input of node.inputs) {
-                if (input.link != null && linkIdRemap.has(input.link)) {
-                    input.link = linkIdRemap.get(input.link);
-                }
-            }
-        }
-    }
-
-    // ---------- 7. Строим карты графа ----------
-    const nodesById = new Map(allNodes.map(n => [n.id, n]));
-    const incomingByNodeId = new Map();
-    const outgoingByNodeId = new Map();
-
-    function addEdge(edge) {
-        if (!outgoingByNodeId.has(edge.originNodeId)) outgoingByNodeId.set(edge.originNodeId, []);
-        if (!incomingByNodeId.has(edge.targetNodeId)) incomingByNodeId.set(edge.targetNodeId, []);
-        outgoingByNodeId.get(edge.originNodeId).push(edge);
-        incomingByNodeId.get(edge.targetNodeId).push(edge);
-    }
-
-    for (const link of filteredLinks) {
-        const originNode = nodesById.get(link.origin_id);
-        const targetNode = nodesById.get(link.target_id);
-
-        const edge = {
-            originNodeId: link.origin_id,
-            targetNodeId: link.target_id,
-            linktype: link.type,
-            sourceOutputName: normalizeText(originNode?.outputs?.[link.origin_slot]?.name),
-            targetInputName: normalizeText(targetNode?.inputs?.[link.target_slot]?.name),
-            originType: normalizeText(originNode?.type),
-            targetType: normalizeText(targetNode?.type),
-            dataType: null,
-        };
-        addEdge(edge);
-    }
-
-    return {
-        nodes: allNodes,
-        promptData,
-        nodesById,
-        normalLinks: filteredLinks,     // массив объектов связей
-        incomingByNodeId,
-        outgoingByNodeId,
-    };
-}
-function buildRawGraphCtx(workflow, prompt) {
+function buildGraphCtx(workflow, prompt) {
     const promptData = new Map(
         Object.entries(prompt ?? {}).map(([k, v]) => [
             isNaN(k) ? k : Number(k),
@@ -270,13 +62,11 @@ function buildRawGraphCtx(workflow, prompt) {
         }
     }
     const allNodes = [];
-    const idMap = new Map();        // старый id узла → новый id
+    const idMap = new Map();
     for (const node of nodes) {
         if (subgraphByNodeId.has(node.id)) continue;
         allNodes.push({ ...node });
     }
-
-    // 2. Внутренние узлы сабграфов
     for (const [, key] of subgraphByNodeId.entries()) {
         const prefix = `${key.node.id}:`;
         if (key.sub.nodes) {
@@ -305,105 +95,6 @@ function buildRawGraphCtx(workflow, prompt) {
         allActiveNodes
     }
 }
-function getDownstreamSignals(startNode, graphCtx, maxDepth = 4) {
-    const queue = [{ nodeId: startNode.id, depth: 0, path: [startNode.id] }];
-    const visited = new Set([startNode.id]);
-    const signals = {
-        reachesPositive: false,
-        reachesNegative: false,
-        reachesModel: false,
-        reachesLatent: false,
-        reachesSampler: false,
-        positivePath: null,
-        negativePath: null,
-        modelPath: null,
-        latentPath: null,
-    };
-
-    while (queue.length) {
-        const current = queue.shift();
-        if (!current || current.depth >= maxDepth) continue;
-
-        const currentNode = graphCtx.nodesById.get(current.nodeId);
-
-        // Если текущая нода bypassed – просто пробрасываем все её выходы, не анализируя сигналы
-        if (currentNode && currentNode.mode === 4) {
-            const outgoing = graphCtx.outgoingByNodeId.get(currentNode.id) || [];
-            for (const edge of outgoing) {
-                const targetNode = graphCtx.nodesById.get(edge.targetNodeId);
-                if (targetNode && !visited.has(edge.targetNodeId)) {
-                    visited.add(edge.targetNodeId);
-                    queue.push({
-                        nodeId: edge.targetNodeId,
-                        depth: current.depth + 1,
-                        path: [...current.path, edge.targetNodeId],
-                    });
-                }
-            }
-            continue;
-        }
-
-        const outgoing = (graphCtx.outgoingByNodeId.get(current.nodeId) ?? [])
-        for (const edge of outgoing) {
-            const targetNode = graphCtx.nodesById.get(edge.targetNodeId);
-
-            // Если целевая нода bypassed – сразу проходим сквозь неё
-            if (targetNode && targetNode.mode === 4) {
-                if (!visited.has(edge.targetNodeId)) {
-                    visited.add(edge.targetNodeId);
-                    const bypassedOutgoing = graphCtx.outgoingByNodeId.get(edge.targetNodeId) || [];
-                    for (const bypassedEdge of bypassedOutgoing) {
-                        if (!visited.has(bypassedEdge.targetNodeId)) {
-                            visited.add(bypassedEdge.targetNodeId);
-                            queue.push({
-                                nodeId: bypassedEdge.targetNodeId,
-                                depth: current.depth + 1,
-                                path: [...current.path, edge.targetNodeId, bypassedEdge.targetNodeId],
-                            });
-                        }
-                    }
-                }
-                continue; // не проверяем сигналы для bypassed
-            }
-
-            // Обычная проверка для активных нод
-            if (edge.targetInputName === "positive" && edge.linktype === "CONDITIONING") {
-                signals.reachesPositive = true;
-                if (!signals.positivePath) signals.positivePath = [...current.path, edge.targetNodeId];
-            }
-            if (edge.targetInputName === "negative" && edge.linktype === "CONDITIONING") {
-                signals.reachesNegative = true;
-                if (!signals.negativePath) signals.negativePath = [...current.path, edge.targetNodeId];
-            }
-            if (edge.targetInputName === "model" || edge.linktype === "MODEL") {
-                signals.reachesModel = true;
-                if (!signals.modelPath) signals.modelPath = [...current.path, edge.targetNodeId];
-            }
-            if (edge.targetInputName === "latent_image" && edge.linktype === "LATENT") {
-                signals.reachesLatent = true;
-                if (!signals.latentPath) signals.latentPath = [...current.path, edge.targetNodeId];
-            }
-            if (
-                (edge.targetType || "").includes("sampler") &&
-                edge.linktype === "COMBO" ||
-                edge.linktype === "FLOAT" ||
-                edge.linktype === "INT"
-            ) {
-                signals.reachesSampler = true;
-            }
-
-            if (!visited.has(edge.targetNodeId)) {
-                visited.add(edge.targetNodeId);
-                queue.push({
-                    nodeId: edge.targetNodeId,
-                    depth: current.depth + 1,
-                    path: [...current.path, edge.targetNodeId],
-                });
-            }
-        }
-    }
-    return signals;
-}
 function enterSub(link, graphCtx) {
     const subNode = graphCtx.subsProxyNodesById.get(link.target_id);
     const sub = graphCtx.subsById.get(subNode.type);
@@ -420,7 +111,7 @@ function exitSub(link, graphCtx) {
     const exitLinks = subNodeOutputsByName.get(subOutputName).links;
     return exitLinks || [];
 }
-function traceDownstream(startNode, graphCtx) {
+function getDownstreamSignals(startNode, graphCtx) {
     //startNode = graphCtx.nodesById.get(startNode.id) ? graphCtx.subsNodesById.get(startNode.id) : {};
     const queue = [startNode];
     const visited = new Set([startNode.id]);
@@ -681,13 +372,13 @@ function getNodeRole(node, graphCtx, options = {}) {
         samplerParams: 0,
         latent: 0,
     }
-    const type = normalizeText(node.type);
-    const title = normalizeText(node.title);
+    const type = node?.type.toLowerCase();
+    const title = node?.title?.toLowerCase();
     const widgetValues = analyzeWidgets(node, graphCtx);
     const hasWidgetsStrings = node.widgets_values?.some(v => /[\w\d]/.test(v));
     const hasOutLinks = node.outputs.some(o => o.links !== null && o.links.length);
     let downstream = { reachesPositive: false, reachesNegative: false };
-    if (allowLinkTracing) { downstream = traceDownstream(node, graphCtx) };
+    if (allowLinkTracing) { downstream = getDownstreamSignals(node, graphCtx) };
     const nodeHasAnyKeyword = (keywords, ...fields) =>
         fields.some(v =>
             typeof v === "string" &&
@@ -703,7 +394,7 @@ function getNodeRole(node, graphCtx, options = {}) {
 
     if (widgetValues.hasModel) score.model += 1;
     if (downstream.reachesModel) score.model += 1;
-    if (nodeHasAnyKeyword(["checkpoint", "ckpt"], title, type)) score.model += 1;
+    if (nodeHasAnyKeyword(["checkpoint", "ckpt", "model"], title, type, ...outStrings)) score.model += 1;
 
     if (widgetValues.hasLora) score.lora += 1;
     if (downstream.reachesModel) score.lora += 1;
@@ -711,11 +402,11 @@ function getNodeRole(node, graphCtx, options = {}) {
 
     if (widgetValues.hasPositive) score.positive += 1, score.prompt -= 1;
     if (downstream.reachesPositive) score.positive += 1;
-    if (nodeHasAnyKeyword(["positive"], title, type)) score.positive += 1;
+    if (nodeHasAnyKeyword(["positive"], title, type, ...outStrings)) score.positive += 1;
 
     if (widgetValues.hasNegative) score.negative += 1, score.prompt -= 1;
     if (downstream.reachesNegative) score.negative += 1;
-    if (nodeHasAnyKeyword(["negative"], title, type)) score.negative += 1;
+    if (nodeHasAnyKeyword(["negative"], title, type, ...outStrings)) score.negative += 1;
 
     if (score.positive === score.negative) score.prompt = score.positive;
     if (widgetValues.hasPrompt && !widgetValues.hasPositive && !widgetValues.hasNegative) score.prompt += 1;
@@ -817,7 +508,7 @@ async function chooseNodeFromCandidates(candidates, e) {
             if (evt.key === "Escape") closeMenu(null);
         };
 
-        for (const { node, role } of candidates) {
+        for (const { node, role, score } of candidates) {
             const container = document.createElement("button");
             container.type = "button";
             container.style.display = "block";
@@ -837,7 +528,7 @@ async function chooseNodeFromCandidates(candidates, e) {
             const header = document.createElement("div");
             header.style.fontWeight = "bold";
             header.style.marginBottom = "4px";
-            header.textContent = `${toNodeLabel(node)} [${role}]`;
+            header.textContent = `${toNodeLabel(node)} [${role}]-${score}`;
             container.appendChild(header);
 
             // Список непустых значений виджетов
@@ -927,39 +618,27 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
     if (!node.widgets?.length || !CONFIG_SERVICE.getFeatureValue("import_individual_nodes.enabled")) {
         return false;
     }
-
     const { workflow, prompt } = await tryToGetWorkflowDataFromEvent(e);
     if (!workflow) return false;
-
-    //const graphCtx = buildGraphContext(workflow, prompt);
-    // const isActive = (n) => n.mode !== 4; // исключаем bypassed
-    // const activeNodes = graphCtx?.nodes.filter(isActive) ?? [];
-    const graphCtx = buildRawGraphCtx(workflow, prompt);
-
-
+    const graphCtx = buildGraphCtx(workflow, prompt);
     // Шаг 1: получаем сырые совпадения
     const strictMatches = getStrictMatches(node, graphCtx);
     const roleMatches = getRoleMatches(node, graphCtx);
-
     // Вспомогательная: проверка, что у ноды есть непустые widgets_values
     const hasWidgetValues = (n) => Array.isArray(n.widgets_values) && n.widgets_values.length > 0;
-
     // Очищаем оба массива от нод без значений
     const strictCandidates = strictMatches.filter(hasWidgetValues);
     const roleCandidates = roleMatches.filter(hasWidgetValues);
-
     // Шаг 2: применяем strict-кандидата, если он единственный
     if (strictCandidates.length === 1) {
         applyCandidateToNode(node, strictCandidates[0]);
         return true;
     }
-
     // Шаг 3: применяем role-кандидата, если он единственный (и нет strict с length 1)
     if (roleCandidates.length === 1) {
         applyCandidateToNode(node, roleCandidates[0]);
         return true;
     }
-
     // Шаг 4: если есть несколько role-кандидатов – показываем меню с ними
     if (roleCandidates.length > 1) {
         const menuItems = roleCandidates.map(n => ({
@@ -974,7 +653,6 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
         }
         return false; // пользователь отменил
     }
-
     // Шаг 5: если role-кандидатов нет, но есть несколько strict-кандидатов – показываем меню с ними
     if (strictCandidates.length > 1) {
         const menuItems = strictCandidates.map(n => ({
@@ -989,7 +667,6 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
         }
         return false;
     }
-
     // Во всех остальных случаях (нет кандидатов) даём стандартному поведению сработать
     return true;
 }
