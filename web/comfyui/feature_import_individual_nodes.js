@@ -436,7 +436,7 @@ function getRoleMatches(targetNode, graphCtx) {
 }
 
 // Модифицированное меню выбора кандидатов: теперь возвращает объект { node, action }
-async function chooseNodeFromCandidates(candidates, targetNode, e) {
+async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
     return new Promise((resolve) => {
         const existing = document.getElementById("rgthree-primitive-import-menu");
         if (existing) existing.remove();
@@ -459,29 +459,36 @@ async function chooseNodeFromCandidates(candidates, targetNode, e) {
 
         let selectedValue = null;
         let selectedWidgetEl = null;
-        const mapping = {}; // Буфер для ручного маппинга: { targetWidgetIndex: value }
+        const mapping = {};
 
-        // --- СОЗДАНИЕ ПАНЕЛИ ПРОКСИ (Изначально скрыта) ---
+        // Функция нормализации ID для сабграфов ("123:456" -> "456")
+        const normalizeId = (id) => {
+            if (id === undefined || id === null) return null;
+            const s = String(id);
+            return s.includes(":") ? s.split(":").pop() : s;
+        };
+
+        const targetIdNorm = normalizeId(targetNode.id);
+
+        // Панель прокси-ноды (целевой)
         const proxyPanel = document.createElement("div");
         proxyPanel.id = "rgthree-mapping-proxy-panel";
-        proxyPanel.style.display = "none"; // Скрыта до первого клика по виджету
+        proxyPanel.style.display = "none";
 
         const proxyTitle = document.createElement("div");
         proxyTitle.className = "rgthree-menu-title";
-        proxyTitle.textContent = `Mapping to: ${targetNode.type}`;
+        proxyTitle.textContent = `Mapping to: ${targetNode.type} (ID: ${targetIdNorm})`;
         proxyPanel.appendChild(proxyTitle);
 
-        // Отрисовка слотов целевой ноды
         (targetNode.widgets || []).forEach((w, idx) => {
             const slot = document.createElement("div");
             slot.className = "rgthree-proxy-slot";
-            slot.textContent = w.name;
+            slot.textContent = w.name || `Widget ${idx}`;
             slot.onclick = () => {
                 if (selectedValue !== null) {
                     mapping[idx] = selectedValue;
                     slot.classList.add("mapped");
-                    slot.textContent = `✓ ${w.name}`;
-                    // Снимаем выделение после вставки
+                    slot.textContent = `✓ ${w.name || idx}`;
                     selectedValue = null;
                     if (selectedWidgetEl) selectedWidgetEl.classList.remove("selected");
                 }
@@ -506,10 +513,9 @@ async function chooseNodeFromCandidates(candidates, targetNode, e) {
         const onOutsideClick = (evt) => {
             if (!overlay.contains(evt.target) && !proxyPanel.contains(evt.target)) closeMenu(null);
         };
-        const onKeydown = (evt) => {
-            if (evt.key === "Escape") closeMenu(null);
-        };
+        const onKeydown = (evt) => { if (evt.key === "Escape") closeMenu(null); };
 
+        // Отрисовка кандидатов
         for (const { node, role, score } of candidates) {
             const container = document.createElement("div");
             container.className = "rgthree-mock-node";
@@ -517,39 +523,61 @@ async function chooseNodeFromCandidates(candidates, targetNode, e) {
             const header = document.createElement("div");
             header.className = "rgthree-mock-node-header";
             header.style.backgroundColor = ROLE_COLORS[role] || ROLE_COLORS.unknown;
-            // Используем typeof для проверки функции, если она не определена глобально
             const label = (typeof toNodeLabel === 'function') ? toNodeLabel(node) : (node.type || 'Node');
             header.textContent = `${label} [${role}]-${score}`;
-            header.onclick = () => closeMenu({ node, action: "direct" }); // Клик по шапке = Apply Exactly
+            header.onclick = () => closeMenu({ node, action: "direct" });
             container.appendChild(header);
 
             const body = document.createElement("div");
             body.className = "rgthree-mock-node-body";
+            body.onclick = (evt) => {
+                if (evt.target === body) closeMenu({ node, action: "direct" });
+            };
 
+            // Достаем данные из promptData Map
+            let nodeInPrompt = null;
+            const nodeIdNorm = normalizeId(node.id);
+
+            if (graphCtx?.promptData instanceof Map) {
+                for (let [fullId, data] of graphCtx.promptData) {
+                    if (normalizeId(fullId) === nodeIdNorm) {
+                        nodeInPrompt = data;
+                        break;
+                    }
+                }
+            }
+
+            const promptInputs = nodeInPrompt?.inputs || {};
             const values = node.widgets_values || [];
-            let hasWidgets = false;
 
             for (let i = 0; i < values.length; i++) {
                 const val = values[i];
                 if (val === undefined || val === null || String(val).trim() === "") continue;
-                hasWidgets = true;
+
+                // Матчинг имени
+                let widgetName = Object.keys(promptInputs).find(key => {
+                    const inputVal = promptInputs[key];
+                    if (Array.isArray(inputVal)) return false;
+                    // Сравнение для int, float и string
+                    if (typeof inputVal === 'number' && typeof val === 'number') return inputVal === val;
+                    return String(inputVal) === String(val);
+                });
+
+                if (!widgetName) widgetName = `widgtet[${i}]`;
 
                 const text = String(val).trim();
                 const preview = text.length > 150 ? text.slice(0, 150) + "..." : text;
+
                 const widgetLine = document.createElement("div");
                 widgetLine.className = "rgthree-mock-widget";
-                widgetLine.textContent = preview;
+                widgetLine.textContent = `${widgetName}: ${preview}`;
 
-                // --- ЛОГИКА КЛИКА ПО ВИДЖЕТУ ---
                 widgetLine.onclick = (evt) => {
                     evt.stopPropagation();
-                    // Снимаем старое выделение
                     overlay.querySelectorAll('.rgthree-mock-widget').forEach(el => el.classList.remove('selected'));
-                    // Ставим новое
-                    widgetLine.classList.add('selected');
-
+                    widgetLine.classList.add("selected");
                     selectedValue = val;
-                    // Показываем прокси-панель и позиционируем её справа от основного меню
+
                     const menuRect = overlay.getBoundingClientRect();
                     proxyPanel.style.display = "block";
                     proxyPanel.style.left = `${menuRect.right + 20}px`;
@@ -559,14 +587,14 @@ async function chooseNodeFromCandidates(candidates, targetNode, e) {
                 body.appendChild(widgetLine);
             }
 
-            if (!hasWidgets) {
+            if (body.children.length === 0) {
                 const emptyMsg = document.createElement("div");
                 emptyMsg.className = "rgthree-mock-widget-empty";
                 emptyMsg.textContent = "(no widget values)";
                 body.appendChild(emptyMsg);
             }
-            container.appendChild(body);
 
+            container.appendChild(body);
             overlay.appendChild(container);
         }
 
@@ -687,7 +715,7 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
             score: getNodeRole(n, graphCtx).score
         }));
 
-        const chosen = await chooseNodeFromCandidates(menuItems, node, e);
+        const chosen = await chooseNodeFromCandidates(menuItems, node, e, graphCtx);
         if (chosen) {
             applyCandidateToNode(node, chosen); // Она теперь сама разберется, direct там или manual
             return true;
