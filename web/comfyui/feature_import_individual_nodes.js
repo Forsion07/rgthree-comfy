@@ -542,7 +542,7 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 
         const btnApplyManual = document.createElement("button");
         btnApplyManual.className = "rgthree-mock-btn-apply";
-        btnApplyManual.textContent = "Apply Manual Mapping";
+        btnApplyManual.textContent = "Apply";
         btnApplyManual.onclick = () => closeMenu({ action: "manual", mapping });
         proxyPanel.appendChild(btnApplyManual);
 
