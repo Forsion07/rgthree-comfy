@@ -443,17 +443,61 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 
         const overlay = document.createElement("div");
         overlay.id = "rgthree-primitive-import-menu";
-        overlay.style.left = `${Math.max(8, e.clientX || 8)}px`;
-        overlay.style.top = `${Math.max(8, e.clientY || 8)}px`;
 
+        // --- ЛОГИКА УМНОЙ ПОЗИЦИИ ---
+        document.body.appendChild(overlay); // Сначала добавляем, чтобы узнать высоту
+
+        const menuWidth = 520; // Соответствует max-width в CSS
+        const menuHeight = Math.min(window.innerHeight * 0.7, candidates.length * 150);
+
+        let left = e.clientX || 8;
+        // В блоке расчета top:
+        let top = e.clientY || 8;
+        const offset = 40; // Дополнительный запас в пикселях
+
+        // Если меню не влезает по ширине — сдвигаем влево
+        if (left + menuWidth > window.innerWidth) {
+            left = window.innerWidth - menuWidth - 20;
+        }
+        // Если не влезает по высоте — сдвигаем вверх
+        if (top + menuHeight > window.innerHeight) {
+            top = window.innerHeight - menuHeight - offset;
+        }
+
+        overlay.style.left = `${Math.max(8, left)}px`;
+        overlay.style.top = `${Math.max(8, top)}px`;
+
+        // --- ЛОГИКА ПЕРЕТАСКИВАНИЯ (DRAG) ---
         const title = document.createElement("div");
         title.className = "rgthree-menu-title";
-        title.textContent = "[rgthree-comfy] Select node to import values from";
+        title.style.cursor = "move"; // Показываем, что можно тащить
+        title.textContent = "::: Select node to import values from";
         overlay.appendChild(title);
+
+        let isDragging = false;
+        let offsetX, offsetY;
+
+        title.onmousedown = (e) => {
+            isDragging = true;
+            offsetX = e.clientX - overlay.offsetLeft;
+            offsetY = e.clientY - overlay.offsetTop;
+            title.style.background = "rgba(255, 255, 255, 0.1)"; // Визуальный отклик
+        };
+
+        window.addEventListener("mousemove", (e) => {
+            if (!isDragging) return;
+            overlay.style.left = `${e.clientX - offsetX}px`;
+            overlay.style.top = `${e.clientY - offsetY}px`;
+        });
+
+        window.addEventListener("mouseup", () => {
+            isDragging = false;
+            title.style.background = "";
+        });
 
         const ROLE_COLORS = {
             latent: "#82366b", model: "#4e3573", lora: "#2c5c41",
-            positive: "#386641", negative: "#732c2c", samplerParams: "#735c2c",
+            positive: "#386641", negative: "#732c2c", samplerParams: "#907130",
             prompt: "#733e2c", unknown: "#333333"
         };
 
@@ -523,6 +567,10 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         const onKeydown = (e) => {
             if (e.key === "Escape") closeMenu(null, e);
         };
+
+        const scrollBox = document.createElement("div");
+        scrollBox.className = "rgthree-mock-node-container";
+        overlay.appendChild(scrollBox);
 
         // Отрисовка кандидатов
         for (const { node, role, score } of candidates) {
@@ -614,7 +662,7 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             }
 
             container.appendChild(body);
-            overlay.appendChild(container);
+            scrollBox.appendChild(container);
         }
 
         const cancelBtn = document.createElement("button");

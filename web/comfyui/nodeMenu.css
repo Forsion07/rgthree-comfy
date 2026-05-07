@@ -23,12 +23,41 @@
 }
 
 #rgthree-primitive-import-menu {
+    display: flex !important;
+    flex-direction: column !important;
     max-width: 520px;
     max-height: 75vh;
     overflow-y: auto;
     overflow-x: hidden;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    padding: 12px 12px 12px 12px !important
 }
 /* --- 2. ЗАГОЛОВКИ И СКРОЛЛ --- */
+.rgthree-mock-node-container {
+    overflow-y: auto !important;
+    overflow-x: visible !important;
+    /* РАЗРЕШАЕМ выход за границы по горизонтали */
+    flex: 1 1 auto;
+    flex-grow: 1;
+    /* Занимает всё свободное место */
+    padding: 10px 15px !important;
+    margin: 0 -10px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding-right: 6px;
+    margin-bottom: 8px;
+    /* Расстояние между нодами, чтобы не слипались */
+}
+.rgthree-mock-node-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.rgthree-mock-node-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+}
 .rgthree-menu-title {
     font-weight: 600;
     font-size: 12px;
@@ -38,6 +67,7 @@
     letter-spacing: 0.5px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding-bottom: 6px;
+    flex-shrink: 0 !important;
 }
 
 #rgthree-primitive-import-menu::-webkit-scrollbar {
@@ -51,6 +81,9 @@
 
 /* --- 3. НОДЫ-КАНДИДАТЫ --- */
 .rgthree-mock-node {
+    flex-shrink: 0 !important;
+    width: 100%;
+    box-sizing: border-box;
     background: rgba(0, 0, 0, 0.5) !important; /* Тёмное тело ноды */
     border: 1px solid rgba(255, 255, 255, 0.05) !important;
     border-radius: 8px !important;
@@ -190,8 +223,9 @@
 
 .rgthree-mock-btn-cancel {
     width: 100%;
-    margin-top: 12px;
-    padding: 10px;
+    height: 40px;
+    margin-top: 0 !important;
+    padding: 12px;
     background: rgba(255, 255, 255, 0.05) !important;
     color: #999 !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -200,6 +234,8 @@
     font-size: 12px;
     font-weight: 600;
     transition: all 0.2s ease !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
 }
 
 .rgthree-mock-btn-cancel:hover {
