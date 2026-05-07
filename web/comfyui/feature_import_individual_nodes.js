@@ -711,11 +711,21 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 function applyCandidateToNode(targetNode, result) {
     if (!result) return;
 
+    // Определяем, пришла ли нам просто нода (авто-вставка) или объект из меню
+    const isManual = result.action === "manual";
+    const sourceNode = result.node || (result.widgets_values ? result : null);
+
     let next = [...(targetNode.widgets_values || [])];
 
-    // СЛУЧАЙ 1: Полный импорт (Apply Exactly / Клик по шапке)
-    if (result.action === "direct") {
-        const incoming = result.node?.widgets_values || [];
+    // СЛУЧАЙ 1: Ручной маппинг из нашего нового меню
+    if (isManual && result.mapping) {
+        for (const [idx, value] of Object.entries(result.mapping)) {
+            next[parseInt(idx)] = value;
+        }
+    }
+    // СЛУЧАЙ 2: Твоя оригинальная логика (прямой импорт ноды)
+    else if (sourceNode) {
+        const incoming = sourceNode.widgets_values || [];
         for (let i = 0; i < incoming.length; i++) {
             if (Array.isArray(next[i]) && Array.isArray(incoming[i])) {
                 next[i] = [...incoming[i]];
@@ -734,35 +744,24 @@ function applyCandidateToNode(targetNode, result) {
         next.length = incoming.length;
     }
 
-    // СЛУЧАЙ 2: Ручной маппинг по виджетам
-    else if (result.action === "manual" && result.mapping) {
-        for (const [idx, value] of Object.entries(result.mapping)) {
-            const index = parseInt(idx);
-            // При ручном маппинге просто заменяем значение в конкретном слоте
-            next[index] = value;
-        }
-    }
-
-    // 1. Применяем через базовый метод ComfyUI (для сохранения в файл ворклфоу)
+    // Применяем через базовый метод ComfyUI
     targetNode.configure({
         title: targetNode.title,
         widgets_values: next
     });
 
-    // 2. СИНХРОНИЗАЦИЯ: Чтобы значения сразу появились в полях на экране
+    // СИНХРОНИЗАЦИЯ: Чтобы значения сразу появились в полях (Lora Manager и т.д.)
     if (targetNode.widgets) {
         targetNode.widgets.forEach((w, i) => {
             if (next[i] !== undefined) {
                 w.value = next[i];
-                // Вызываем callback виджета, чтобы нода поняла, что данные изменились
-                if (w.callback) {
+                if (typeof w.callback === "function") {
                     w.callback(next[i]);
                 }
             }
         });
     }
 
-    // 3. Перерисовываем канвас
     if (targetNode.setDirtyCanvas) {
         targetNode.setDirtyCanvas(true, true);
     }
@@ -778,40 +777,50 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
     const graphCtx = buildGraphCtx(workflow, prompt);
     const strictMatches = getStrictMatches(node, graphCtx);
     const roleMatches = getRoleMatches(node, graphCtx);
+
     const hasWidgetValues = (n) => Array.isArray(n.widgets_values) && n.widgets_values.length > 0;
     const strictCandidates = strictMatches.filter(hasWidgetValues);
     const roleCandidates = roleMatches.filter(hasWidgetValues);
 
-    // Если есть точное совпадение (один тип) и нет roleCandidates, просто применяем
-    if (strictCandidates.length === 1 && roleCandidates.length === 0) {
+    // Авто-вставка (Strict)
+    if (strictCandidates.length === 1) {
         applyCandidateToNode(node, strictCandidates[0]);
         return true;
     }
 
-    let candidatesList = [];
-    if (roleCandidates.length > 0) {
-        candidatesList = roleCandidates;
-    } else if (strictCandidates.length > 1) {
-        candidatesList = strictCandidates;
-    }
-
-    // Если кандидат всего один, и он точно такого же типа, можно сразу применить
-    if (candidatesList.length === 1 && candidatesList[0].type === node.type) {
-        applyCandidateToNode(node, candidatesList[0]);
+    // Авто-вставка (Role)
+    if (roleCandidates.length === 1) {
+        applyCandidateToNode(node, roleCandidates[0]);
         return true;
     }
 
-    // Во всех остальных случаях (разные типы или несколько кандидатов) выводим меню
-    if (candidatesList.length > 0) {
-        const menuItems = candidatesList.map(n => ({
+    // Выбор из нескольких по Роли
+    if (roleCandidates.length > 1) {
+        const menuItems = roleCandidates.map(n => ({
             node: n,
             role: getNodeRole(n, graphCtx).role,
             score: getNodeRole(n, graphCtx).score
         }));
-
+        // ПЕРЕДАЕМ контекст для отрисовки превью
         const chosen = await chooseNodeFromCandidates(menuItems, node, e, graphCtx);
         if (chosen) {
-            applyCandidateToNode(node, chosen); // Она теперь сама разберется, direct там или manual
+            applyCandidateToNode(node, chosen);
+            return true;
+        }
+        return false;
+    }
+
+    // Выбор из нескольких Strict
+    if (strictCandidates.length > 1) {
+        const menuItems = strictCandidates.map(n => ({
+            node: n,
+            role: getNodeRole(n, graphCtx).role,
+            score: getNodeRole(n, graphCtx).score
+        }));
+        // ПЕРЕДАЕМ контекст для отрисовки превью
+        const chosen = await chooseNodeFromCandidates(menuItems, node, e, graphCtx);
+        if (chosen) {
+            applyCandidateToNode(node, chosen);
             return true;
         }
         return false;
