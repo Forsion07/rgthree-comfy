@@ -279,3 +279,94 @@
     background-color: #4e3573 !important;
     color: #fff !important;
 }
+
+/* Основное меню с эффектом Acrylic */
+#rgthree-primitive-import-menu,
+#rgthree-mapping-proxy-panel {
+    background: rgba(25, 25, 25, 0.7) !important;
+    /* Полупрозрачный темный фон */
+    backdrop-filter: blur(12px) saturate(160%) !important;
+    /* Размытие заднего плана и сочность */
+    -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
+
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    /* Тонкая светлая граница */
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5) !important;
+    /* Мягкая глубокая тень */
+    border-radius: 12px !important;
+    padding: 10px !important;
+    z-index: 10000 !important;
+    position: fixed !important;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #eee;
+}
+
+/* Эффект свечения границ (необязательно, но добавляет "стеклянности") */
+#rgthree-primitive-import-menu::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border-radius: 12px;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+/* Заголовок меню */
+.rgthree-menu-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 5px;
+}
+
+/* Стили нод внутри меню */
+.rgthree-mock-node {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 8px !important;
+    margin-bottom: 8px !important;
+    overflow: hidden;
+}
+
+/* Наведение на виджет (усиливаем контраст на фоне стекла) */
+.rgthree-mock-widget {
+    background: rgba(255, 255, 255, 0.02) !important;
+    transition: all 0.15s ease !important;
+}
+
+.rgthree-mock-widget:hover {
+    background: rgba(255, 255, 255, 0.15) !important;
+    color: #fff !important;
+    transform: translateX(2px);
+    /* Легкое смещение при наведении */
+}
+
+.rgthree-mock-widget.selected {
+    background: rgba(130, 54, 107, 0.6) !important;
+    /* Твой фиолетовый, но прозрачный */
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+/* Прокси-слоты */
+.rgthree-proxy-slot {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-radius: 4px;
+    margin: 4px 0;
+    padding: 6px 10px;
+}
+
+.rgthree-proxy-slot:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+}
