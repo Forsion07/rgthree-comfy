@@ -13,6 +13,11 @@
     padding: 12px;
     font-family: Arial, sans-serif;
 }
+/* Убираем выделение текста везде */
+#rgthree-primitive-import-menu,
+#rgthree-mapping-proxy-panel {
+    user-select: none !important;
+}
 
 #rgthree-primitive-import-menu::-webkit-scrollbar {
     width: 8px;
@@ -136,4 +141,141 @@
 .rgthree-mock-btn-cancel:hover {
     background: #2a2a2a;
     color: #fff;
+}
+
+
+/* Панель прокси-ноды для маппинга */
+#rgthree-mapping-proxy-panel {
+    position: fixed;
+    z-index: 100001;
+    width: 280px;
+    background-color: #1a1a1a;
+    border: 2px solid #4e3573;
+    /* Цвет модели для акцента */
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    display: none;
+    /* Управляется из JS */
+}
+
+.rgthree-proxy-slot {
+    background-color: #222;
+    border: 1px dashed #444;
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #888;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.rgthree-proxy-slot:hover {
+    border-color: #aaa;
+    background-color: #2a2a2a;
+    color: #eee;
+}
+
+/* Состояние, когда в слот что-то "закинули" */
+.rgthree-proxy-slot.mapped {
+    border: 1px solid #2c5c41;
+    background-color: #1a251d;
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Подсветка выбранного виджета в основном меню */
+.rgthree-mock-widget.selected {
+    border-color: #4e3573;
+    background-color: #251b33;
+    color: #fff;
+}
+
+.rgthree-mock-btn-apply {
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px;
+    background: #2c5c41;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+
+/* Улучшения виджетов в меню */
+.rgthree-mock-widget {
+    cursor: pointer !important;
+    /* Курсор-пальчик */
+    user-select: none !important;
+    /* Запрет выделения текста (убирает каретку) */
+    transition: background-color 0.1s, color 0.1s !important;
+}
+
+.rgthree-mock-widget:hover {
+    background-color: #333 !important;
+    /* Легкая подсветка фона */
+    color: #fff !important;
+    /* Текст становится ярче */
+    border-color: #555 !important;
+}
+
+/* Подсветка выбранного виджета, пока мы не кликнули в прокси-ноду */
+.rgthree-mock-widget.selected {
+    background-color: #4e3573 !important;
+    color: #fff !important;
+    border-color: #82366b !important;
+}
+
+/* Стили для прокси-панели (чтобы тоже был пальчик) */
+.rgthree-proxy-slot {
+    cursor: pointer !important;
+    user-select: none !important;
+}
+
+.rgthree-proxy-slot:hover {
+    background-color: #2a2a2a !important;
+    border-color: #666 !important;
+}
+
+.rgthree-mock-node-header,
+.rgthree-mock-widget,
+.rgthree-proxy-slot,
+.rgthree-mock-btn,
+.rgthree-mock-btn-cancel {
+    cursor: pointer !important;
+}
+
+/* Выделение ноды целиком */
+.rgthree-mock-node {
+    transition: background-color 0.15s, border-color 0.15s !important;
+}
+
+/* Подсветка ноды при наведении на тело или шапку */
+.rgthree-mock-node:hover {
+    border-color: #666 !important;
+    background-color: #2a2a2a !important;
+    /* Чуть светлее обычного фона */
+}
+
+/* Эффект взаимоисключения: когда мы на виджете, нода не должна "гореть" так ярко */
+.rgthree-mock-node:has(.rgthree-mock-widget:hover) {
+    background-color: #262626 !important;
+    /* Возвращаем к исходному */
+}
+
+/* Подсветка виджета */
+.rgthree-mock-widget:hover {
+    background-color: #3d3d3d !important;
+    color: #fff !important;
+    border-color: #777 !important;
+}
+
+/* Выделенный виджет (активный для маппинга) */
+.rgthree-mock-widget.selected {
+    background-color: #4e3573 !important;
+    color: #fff !important;
 }

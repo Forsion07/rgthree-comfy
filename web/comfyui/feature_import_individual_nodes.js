@@ -435,178 +435,14 @@ function getRoleMatches(targetNode, graphCtx) {
     return candidateNodes;
 }
 
-// Новая функция для ручного маппинга виджетов
-async function chooseWidgetMapping(targetNode, candidateNode, e) {
-    return new Promise((resolve) => {
-        const existing = document.getElementById("rgthree-widget-mapping-menu");
-        if (existing) existing.remove();
-
-        const overlay = document.createElement("div");
-        overlay.id = "rgthree-widget-mapping-menu";
-        overlay.style.position = "fixed";
-        overlay.style.zIndex = "100000";
-        overlay.style.left = `${Math.max(8, e.clientX || 8)}px`;
-        overlay.style.top = `${Math.max(8, e.clientY || 8)}px`;
-        overlay.style.width = "400px";
-        overlay.style.maxWidth = "90vw";
-        overlay.style.maxHeight = "75vh";
-        overlay.style.overflow = "auto";
-        overlay.style.background = "#1f1f1f";
-        overlay.style.border = "1px solid #4a4a4a";
-        overlay.style.borderRadius = "8px";
-        overlay.style.boxShadow = "0 8px 24px rgba(0,0,0,.35)";
-        overlay.style.padding = "12px";
-        overlay.style.fontFamily = "sans-serif";
-
-        const title = document.createElement("div");
-        title.textContent = `Map Widgets from: ${candidateNode.title || candidateNode.type}`;
-        title.style.color = "#ddd";
-        title.style.fontSize = "13px";
-        title.style.fontWeight = "bold";
-        title.style.marginBottom = "12px";
-        title.style.paddingBottom = "8px";
-        title.style.borderBottom = "1px solid #333";
-        overlay.appendChild(title);
-
-        const sourceValues = candidateNode.widgets_values || [];
-        const targetWidgets = targetNode.widgets || [];
-        const mappingSelectors = [];
-
-        targetWidgets.forEach((tWidget, tIndex) => {
-            const row = document.createElement("div");
-            row.style.display = "flex";
-            row.style.flexDirection = "column";
-            row.style.marginBottom = "10px";
-
-            const label = document.createElement("div");
-            label.textContent = `${tWidget.name} (${tWidget.type || typeof tWidget.value})`;
-            label.style.fontSize = "11px";
-            label.style.color = "#aaa";
-            label.style.marginBottom = "4px";
-
-            const select = document.createElement("select");
-            select.style.background = "#151515";
-            select.style.color = "#eee";
-            select.style.border = "1px solid #555";
-            select.style.padding = "4px";
-            select.style.borderRadius = "4px";
-            select.style.fontSize = "12px";
-            select.style.cursor = "pointer";
-
-            const optNone = document.createElement("option");
-            optNone.value = "-1";
-            optNone.textContent = "-- Keep Current Value --";
-            select.appendChild(optNone);
-
-            let autoMatchIdx = -1;
-
-            sourceValues.forEach((sVal, sIndex) => {
-                const opt = document.createElement("option");
-                opt.value = sIndex;
-                let preview = String(sVal);
-                if (preview.length > 50) preview = preview.slice(0, 50) + "...";
-                opt.textContent = `[Idx: ${sIndex}] ${preview}`;
-                select.appendChild(opt);
-
-                // Примитивная логика авто-подстановки для удобства
-                if (tIndex === sIndex && typeof tWidget.value === typeof sVal) {
-                    autoMatchIdx = sIndex;
-                }
-            });
-
-            if (autoMatchIdx !== -1) {
-                select.value = autoMatchIdx;
-            }
-
-            row.appendChild(label);
-            row.appendChild(select);
-            overlay.appendChild(row);
-
-            mappingSelectors.push({ select, tIndex });
-        });
-
-        const actionRow = document.createElement("div");
-        actionRow.style.display = "flex";
-        actionRow.style.gap = "8px";
-        actionRow.style.marginTop = "16px";
-
-        const btnSave = document.createElement("button");
-        btnSave.textContent = "Apply Mapping";
-        btnSave.style.flex = "1";
-        btnSave.style.padding = "6px";
-        btnSave.style.background = "#2a2a2a";
-        btnSave.style.color = "#fff";
-        btnSave.style.border = "1px solid #4a4a4a";
-        btnSave.style.borderRadius = "4px";
-        btnSave.style.cursor = "pointer";
-        btnSave.onclick = () => {
-            const nextValues = [...(targetNode.widgets_values || [])];
-            mappingSelectors.forEach(({ select, tIndex }) => {
-                const sIdx = parseInt(select.value, 10);
-                if (sIdx >= 0) {
-                    const incomingVal = sourceValues[sIdx];
-                    if (Array.isArray(nextValues[tIndex]) && Array.isArray(incomingVal)) {
-                        nextValues[tIndex] = [...incomingVal];
-                    } else if (
-                        typeof nextValues[tIndex] === "object" && nextValues[tIndex] !== null &&
-                        typeof incomingVal === "object" && incomingVal !== null &&
-                        !Array.isArray(nextValues[tIndex]) && !Array.isArray(incomingVal)
-                    ) {
-                        nextValues[tIndex] = { ...nextValues[tIndex], ...incomingVal };
-                    } else {
-                        nextValues[tIndex] = incomingVal;
-                    }
-                }
-            });
-            closeMenu(nextValues);
-        };
-
-        const btnCancel = document.createElement("button");
-        btnCancel.textContent = "Cancel";
-        btnCancel.style.flex = "1";
-        btnCancel.style.padding = "6px";
-        btnCancel.style.background = "#1a1a1a";
-        btnCancel.style.color = "#ccc";
-        btnCancel.style.border = "1px solid #3f3f3f";
-        btnCancel.style.borderRadius = "4px";
-        btnCancel.style.cursor = "pointer";
-        btnCancel.onclick = () => closeMenu(null);
-
-        actionRow.appendChild(btnSave);
-        actionRow.appendChild(btnCancel);
-        overlay.appendChild(actionRow);
-        document.body.appendChild(overlay);
-
-        const closeMenu = (result) => {
-            window.removeEventListener("mousedown", onOutsideClick, true);
-            window.removeEventListener("keydown", onKeydown, true);
-            overlay.remove();
-            resolve(result);
-        };
-
-        const onOutsideClick = (evt) => {
-            if (!overlay.contains(evt.target)) closeMenu(null);
-        };
-        const onKeydown = (evt) => {
-            if (evt.key === "Escape") closeMenu(null);
-        };
-
-        setTimeout(() => {
-            window.addEventListener("mousedown", onOutsideClick, true);
-            window.addEventListener("keydown", onKeydown, true);
-        }, 0);
-    });
-}
-
 // Модифицированное меню выбора кандидатов: теперь возвращает объект { node, action }
-async function chooseNodeFromCandidates(candidates, e) {
+async function chooseNodeFromCandidates(candidates, targetNode, e) {
     return new Promise((resolve) => {
         const existing = document.getElementById("rgthree-primitive-import-menu");
         if (existing) existing.remove();
 
         const overlay = document.createElement("div");
         overlay.id = "rgthree-primitive-import-menu";
-        // Позиционируем инлайн, так как координаты зависят от мыши
         overlay.style.left = `${Math.max(8, e.clientX || 8)}px`;
         overlay.style.top = `${Math.max(8, e.clientY || 8)}px`;
 
@@ -615,45 +451,78 @@ async function chooseNodeFromCandidates(candidates, e) {
         title.textContent = "[rgthree-comfy] Select node to import values from";
         overlay.appendChild(title);
 
-        // Цвета шапок нод в зависимости от их роли
         const ROLE_COLORS = {
-            latent: "#82366b",        // приглушенный розовый
-            model: "#4e3573",         // фиолетовый
-            lora: "#2c5c41",          // зеленый
-            positive: "#386641",      // насыщенный зеленый
-            negative: "#732c2c",      // красный
-            samplerParams: "#735c2c", // желтовато-коричневый
-            prompt: "#733e2c",        // оранжевый
-            unknown: "#333333"        // дефолтный серый
+            latent: "#82366b", model: "#4e3573", lora: "#2c5c41",
+            positive: "#386641", negative: "#732c2c", samplerParams: "#735c2c",
+            prompt: "#733e2c", unknown: "#333333"
         };
+
+        let selectedValue = null;
+        let selectedWidgetEl = null;
+        const mapping = {}; // Буфер для ручного маппинга: { targetWidgetIndex: value }
+
+        // --- СОЗДАНИЕ ПАНЕЛИ ПРОКСИ (Изначально скрыта) ---
+        const proxyPanel = document.createElement("div");
+        proxyPanel.id = "rgthree-mapping-proxy-panel";
+        proxyPanel.style.display = "none"; // Скрыта до первого клика по виджету
+
+        const proxyTitle = document.createElement("div");
+        proxyTitle.className = "rgthree-menu-title";
+        proxyTitle.textContent = `Mapping to: ${targetNode.type}`;
+        proxyPanel.appendChild(proxyTitle);
+
+        // Отрисовка слотов целевой ноды
+        (targetNode.widgets || []).forEach((w, idx) => {
+            const slot = document.createElement("div");
+            slot.className = "rgthree-proxy-slot";
+            slot.textContent = w.name;
+            slot.onclick = () => {
+                if (selectedValue !== null) {
+                    mapping[idx] = selectedValue;
+                    slot.classList.add("mapped");
+                    slot.textContent = `✓ ${w.name}`;
+                    // Снимаем выделение после вставки
+                    selectedValue = null;
+                    if (selectedWidgetEl) selectedWidgetEl.classList.remove("selected");
+                }
+            };
+            proxyPanel.appendChild(slot);
+        });
+
+        const btnApplyManual = document.createElement("button");
+        btnApplyManual.className = "rgthree-mock-btn-apply";
+        btnApplyManual.textContent = "Apply Manual Mapping";
+        btnApplyManual.onclick = () => closeMenu({ action: "manual", mapping });
+        proxyPanel.appendChild(btnApplyManual);
 
         const closeMenu = (selectedResult) => {
             window.removeEventListener("mousedown", onOutsideClick, true);
             window.removeEventListener("keydown", onKeydown, true);
             overlay.remove();
+            proxyPanel.remove();
             resolve(selectedResult);
         };
 
         const onOutsideClick = (evt) => {
-            if (!overlay.contains(evt.target)) closeMenu(null);
+            if (!overlay.contains(evt.target) && !proxyPanel.contains(evt.target)) closeMenu(null);
         };
         const onKeydown = (evt) => {
             if (evt.key === "Escape") closeMenu(null);
         };
 
         for (const { node, role, score } of candidates) {
-            // Главный контейнер "ноды"
             const container = document.createElement("div");
             container.className = "rgthree-mock-node";
 
-            // Шапка ноды (красим динамически)
             const header = document.createElement("div");
             header.className = "rgthree-mock-node-header";
             header.style.backgroundColor = ROLE_COLORS[role] || ROLE_COLORS.unknown;
-            header.textContent = `${toNodeLabel(node)} [${role}]-${score}`;
+            // Используем typeof для проверки функции, если она не определена глобально
+            const label = (typeof toNodeLabel === 'function') ? toNodeLabel(node) : (node.type || 'Node');
+            header.textContent = `${label} [${role}]-${score}`;
+            header.onclick = () => closeMenu({ node, action: "direct" }); // Клик по шапке = Apply Exactly
             container.appendChild(header);
 
-            // Тело ноды
             const body = document.createElement("div");
             body.className = "rgthree-mock-node-body";
 
@@ -662,15 +531,31 @@ async function chooseNodeFromCandidates(candidates, e) {
 
             for (let i = 0; i < values.length; i++) {
                 const val = values[i];
-                if (val === undefined || val === null) continue;
-                let text = String(val).trim();
-                if (text === "") continue;
+                if (val === undefined || val === null || String(val).trim() === "") continue;
                 hasWidgets = true;
 
+                const text = String(val).trim();
                 const preview = text.length > 150 ? text.slice(0, 150) + "..." : text;
                 const widgetLine = document.createElement("div");
                 widgetLine.className = "rgthree-mock-widget";
-                widgetLine.textContent = `[${i}]: ${preview}`;
+                widgetLine.textContent = preview;
+
+                // --- ЛОГИКА КЛИКА ПО ВИДЖЕТУ ---
+                widgetLine.onclick = (evt) => {
+                    evt.stopPropagation();
+                    // Снимаем старое выделение
+                    overlay.querySelectorAll('.rgthree-mock-widget').forEach(el => el.classList.remove('selected'));
+                    // Ставим новое
+                    widgetLine.classList.add('selected');
+
+                    selectedValue = val;
+                    // Показываем прокси-панель и позиционируем её справа от основного меню
+                    const menuRect = overlay.getBoundingClientRect();
+                    proxyPanel.style.display = "block";
+                    proxyPanel.style.left = `${menuRect.right + 20}px`;
+                    proxyPanel.style.top = `${menuRect.top}px`;
+                };
+
                 body.appendChild(widgetLine);
             }
 
@@ -682,24 +567,6 @@ async function chooseNodeFromCandidates(candidates, e) {
             }
             container.appendChild(body);
 
-            // Кнопки действий
-            const actionRow = document.createElement("div");
-            actionRow.className = "rgthree-mock-actions";
-
-            const btnDirect = document.createElement("button");
-            btnDirect.className = "rgthree-mock-btn";
-            btnDirect.textContent = "Apply Exactly";
-            btnDirect.onclick = () => closeMenu({ node, action: "direct" });
-
-            const btnMap = document.createElement("button");
-            btnMap.className = "rgthree-mock-btn";
-            btnMap.textContent = "Map Widgets...";
-            btnMap.onclick = () => closeMenu({ node, action: "map" });
-
-            actionRow.appendChild(btnDirect);
-            actionRow.appendChild(btnMap);
-            container.appendChild(actionRow);
-
             overlay.appendChild(container);
         }
 
@@ -710,6 +577,7 @@ async function chooseNodeFromCandidates(candidates, e) {
         overlay.appendChild(cancelBtn);
 
         document.body.appendChild(overlay);
+        document.body.appendChild(proxyPanel);
 
         setTimeout(() => {
             window.addEventListener("mousedown", onOutsideClick, true);
@@ -718,29 +586,64 @@ async function chooseNodeFromCandidates(candidates, e) {
     });
 }
 
-function applyCandidateToNode(targetNode, candidateNode) {
-    const next = [...(targetNode.widgets_values || [])];
-    const incoming = candidateNode?.widgets_values || [];
-    for (let i = 0; i < incoming.length; i++) {
-        if (Array.isArray(next[i]) && Array.isArray(incoming[i])) {
-            next[i] = [...incoming[i]];
+function applyCandidateToNode(targetNode, result) {
+    if (!result) return;
+
+    let next = [...(targetNode.widgets_values || [])];
+
+    // СЛУЧАЙ 1: Полный импорт (Apply Exactly / Клик по шапке)
+    if (result.action === "direct") {
+        const incoming = result.node?.widgets_values || [];
+        for (let i = 0; i < incoming.length; i++) {
+            if (Array.isArray(next[i]) && Array.isArray(incoming[i])) {
+                next[i] = [...incoming[i]];
+            }
+            else if (
+                typeof next[i] === "object" && next[i] !== null &&
+                typeof incoming[i] === "object" && incoming[i] !== null &&
+                !Array.isArray(next[i]) && !Array.isArray(incoming[i])
+            ) {
+                next[i] = { ...next[i], ...incoming[i] };
+            }
+            else {
+                next[i] = incoming[i];
+            }
         }
-        else if (
-            typeof next[i] === "object" && next[i] !== null &&
-            typeof incoming[i] === "object" && incoming[i] !== null &&
-            !Array.isArray(next[i]) && !Array.isArray(incoming[i])
-        ) {
-            next[i] = { ...next[i], ...incoming[i] };
-        }
-        else {
-            next[i] = incoming[i];
+        next.length = incoming.length;
+    }
+
+    // СЛУЧАЙ 2: Ручной маппинг по виджетам
+    else if (result.action === "manual" && result.mapping) {
+        for (const [idx, value] of Object.entries(result.mapping)) {
+            const index = parseInt(idx);
+            // При ручном маппинге просто заменяем значение в конкретном слоте
+            next[index] = value;
         }
     }
-    next.length = incoming.length;
+
+    // 1. Применяем через базовый метод ComfyUI (для сохранения в файл ворклфоу)
     targetNode.configure({
         title: targetNode.title,
         widgets_values: next
     });
+
+    // 2. СИНХРОНИЗАЦИЯ: Чтобы значения сразу появились в полях на экране
+    if (targetNode.widgets) {
+        targetNode.widgets.forEach((w, i) => {
+            if (next[i] !== undefined) {
+                w.value = next[i];
+                // Вызываем callback виджета, чтобы нода поняла, что данные изменились
+                if (w.callback) {
+                    w.callback(next[i]);
+                }
+            }
+        });
+    }
+
+    // 3. Перерисовываем канвас
+    if (targetNode.setDirtyCanvas) {
+        targetNode.setDirtyCanvas(true, true);
+    }
 }
 
 export async function importIndividualNodesInnerOnDragDrop(node, e) {
@@ -784,16 +687,9 @@ export async function importIndividualNodesInnerOnDragDrop(node, e) {
             score: getNodeRole(n, graphCtx).score
         }));
 
-        const chosen = await chooseNodeFromCandidates(menuItems, e);
+        const chosen = await chooseNodeFromCandidates(menuItems, node, e);
         if (chosen) {
-            if (chosen.action === "map") {
-                const mappedValues = await chooseWidgetMapping(node, chosen.node, e);
-                if (mappedValues) {
-                    node.configure({ title: node.title, widgets_values: mappedValues });
-                }
-            } else {
-                applyCandidateToNode(node, chosen.node);
-            }
+            applyCandidateToNode(node, chosen); // Она теперь сама разберется, direct там или manual
             return true;
         }
         return false;
