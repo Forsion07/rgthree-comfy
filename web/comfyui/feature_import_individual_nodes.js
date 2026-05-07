@@ -502,18 +502,27 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         btnApplyManual.onclick = () => closeMenu({ action: "manual", mapping });
         proxyPanel.appendChild(btnApplyManual);
 
-        const closeMenu = (selectedResult) => {
-            window.removeEventListener("mousedown", onOutsideClick, true);
-            window.removeEventListener("keydown", onKeydown, true);
+        const closeMenu = (selectedResult, evt) => {
+            if (evt) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                evt.stopImmediatePropagation();
+            }
+
+            // Вызываем нашу новую чистку
+            if (overlay._cleanup) overlay._cleanup();
+
             overlay.remove();
             proxyPanel.remove();
-            resolve(selectedResult);
+            resolve(selectedResult || { action: "cancelled" });
         };
 
-        const onOutsideClick = (evt) => {
-            if (!overlay.contains(evt.target) && !proxyPanel.contains(evt.target)) closeMenu(null);
+        const onOutsideClick = (e) => {
+            if (!overlay.contains(e.target) && !proxyPanel.contains(e.target)) closeMenu(null, e);
         };
-        const onKeydown = (evt) => { if (evt.key === "Escape") closeMenu(null); };
+        const onKeydown = (e) => {
+            if (e.key === "Escape") closeMenu(null, e);
+        };
 
         // Отрисовка кандидатов
         for (const { node, role, score } of candidates) {
@@ -525,13 +534,13 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             header.style.backgroundColor = ROLE_COLORS[role] || ROLE_COLORS.unknown;
             const label = (typeof toNodeLabel === 'function') ? toNodeLabel(node) : (node.type || 'Node');
             header.textContent = `${label} [${role}]-${score}`;
-            header.onclick = () => closeMenu({ node, action: "direct" });
+            header.onclick = (e) => closeMenu({ node, action: "direct" }, e);
             container.appendChild(header);
 
             const body = document.createElement("div");
             body.className = "rgthree-mock-node-body";
-            body.onclick = (evt) => {
-                if (evt.target === body) closeMenu({ node, action: "direct" });
+            body.onclick = (e) => {
+                if (e.target === body) closeMenu({ node, action: "direct" }, e);
             };
 
             // Достаем данные из promptData Map
@@ -611,15 +620,42 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         const cancelBtn = document.createElement("button");
         cancelBtn.className = "rgthree-mock-btn-cancel";
         cancelBtn.textContent = "Cancel";
-        cancelBtn.onclick = () => closeMenu(null);
+        cancelBtn.onclick = (e) => closeMenu(null, e);
         overlay.appendChild(cancelBtn);
 
         document.body.appendChild(overlay);
         document.body.appendChild(proxyPanel);
 
         setTimeout(() => {
-            window.addEventListener("mousedown", onOutsideClick, true);
+            const onOutsideClick = (evt) => {
+                // Проверяем, попал ли клик внутрь основного меню или прокси-панели
+                const isInsideMenu = overlay.contains(evt.target);
+                const isInsideProxy = proxyPanel.contains(evt.target);
+
+                if (!isInsideMenu && !isInsideProxy) {
+                    // Если клик вне — убиваем событие и закрываем
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                    evt.stopImmediatePropagation();
+                    closeMenu({ action: "cancelled" }, evt);
+                }
+            };
+
+            const onKeydown = (evt) => {
+                if (evt.key === "Escape") {
+                    closeMenu({ action: "cancelled" }, evt);
+                }
+            };
+
+            // Слушаем на стадии захвата (true), чтобы быть первыми
+            window.addEventListener("pointerdown", onOutsideClick, true);
             window.addEventListener("keydown", onKeydown, true);
+
+            // Чистим слушатели при закрытии
+            overlay._cleanup = () => {
+                window.removeEventListener("pointerdown", onOutsideClick, true);
+                window.removeEventListener("keydown", onKeydown, true);
+            };
         }, 0);
     });
 }
