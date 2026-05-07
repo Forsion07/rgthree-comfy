@@ -190,16 +190,49 @@
 
 .rgthree-mock-btn-cancel {
     width: 100%;
-    margin-top: 8px;
+    margin-top: 12px;
     padding: 10px;
-    background: rgba(255, 255, 255, 0.1) !important;
-    color: #ccc;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #999 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 8px;
     cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease !important;
 }
 
-.rgthree-mock-btn-apply:hover,
 .rgthree-mock-btn-cancel:hover {
-    filter: brightness(1.2);
+    background: rgba(220, 53, 69, 0.2) !important;
+    /* Легкий красный оттенок при наведении */
+    color: #ff4d4d !important;
+    border-color: rgba(220, 53, 69, 0.5) !important;
+    box-shadow: 0 0 15px rgba(220, 53, 69, 0.2);
+}
+
+.rgthree-mock-btn-cancel:active {
+    transform: scale(0.98);
+}
+
+/* Название виджета (ключ) */
+.widget-label {
+    color: #aaa;
+    margin-right: 4px;
+}
+
+/* Значение: Строка (Зеленый) */
+.widget-value.type-string {
+    color: #4ec9b0 !important;
+    /* Приятный мятно-зеленый */
+}
+
+/* Значение: Число (Оранжевый) */
+.widget-value.type-number {
+    color: #ce9178 !important;
+    /* Спокойный оранжево-бежевый */
+}
+
+/* Состояние при выделении (чтобы текст оставался читаемым) */
+.rgthree-mock-widget.selected .widget-value {
+    color: #fff !important;
 }

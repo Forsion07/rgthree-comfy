@@ -566,11 +566,21 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 if (!widgetName) widgetName = `widgtet[${i}]`;
 
                 const text = String(val).trim();
-                const preview = text.length > 150 ? text.slice(0, 150) + "..." : text;
+                if (text === "" && !Array.isArray(val)) continue;
 
+                const preview = text.length > 100 ? text.slice(0, 100) + "..." : text;
                 const widgetLine = document.createElement("div");
                 widgetLine.className = "rgthree-mock-widget";
-                widgetLine.textContent = `${widgetName}: ${preview}`;
+
+                // Определяем класс в зависимости от типа данных
+                let typeClass = "";
+                if (typeof val === 'number') {
+                    typeClass = "type-number"; // Для int и float
+                } else if (typeof val === 'string') {
+                    typeClass = "type-string"; // Для строк
+                }
+
+                widgetLine.innerHTML = `<span class="widget-label">${widgetName}:</span> <span class="widget-value ${typeClass}">${preview}</span>`;
 
                 widgetLine.onclick = (evt) => {
                     evt.stopPropagation();
