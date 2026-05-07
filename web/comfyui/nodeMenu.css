@@ -1,372 +1,205 @@
-/* Основной контейнер меню */
-#rgthree-primitive-import-menu {
-    position: fixed;
-    z-index: 100000;
-    max-width: 520px;
-    max-height: 70vh;
-    overflow-y: auto;
-    overflow-x: hidden;
-    background-color: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-    padding: 12px;
-    font-family: Arial, sans-serif;
-}
-/* Убираем выделение текста везде */
+/* --- 1. ГЛАВНЫЕ КОНТЕЙНЕРЫ (ACRYLIC GLASS) --- */
 #rgthree-primitive-import-menu,
 #rgthree-mapping-proxy-panel {
-    user-select: none !important;
+    position: fixed !important;
+    z-index: 100000 !important;
+
+    /* Прозрачный фон и размытие */
+    background: rgba(20, 20, 20, 0.7) !important;
+    backdrop-filter: blur(12px) saturate(160%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
+
+    /* Граница, которая заменяет before */
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6) !important;
+
+    border-radius: 12px !important;
+    padding: 12px !important;
+    color: #eee !important;
+
+    /* Чтобы фон не двоился при скролле */
+    background-attachment: local !important;
+    overflow-y: auto;
+}
+
+#rgthree-primitive-import-menu {
+    max-width: 520px;
+    max-height: 75vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+/* --- 2. ЗАГОЛОВКИ И СКРОЛЛ --- */
+.rgthree-menu-title {
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    text-transform: auto;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    padding-bottom: 6px;
 }
 
 #rgthree-primitive-import-menu::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
 }
 
 #rgthree-primitive-import-menu::-webkit-scrollbar-thumb {
-    background-color: #555;
-    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
 }
 
-.rgthree-menu-title {
-    color: #ccc;
-    font-size: 12px;
-    margin-bottom: 12px;
-    font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Имитация самой ноды */
+/* --- 3. НОДЫ-КАНДИДАТЫ --- */
 .rgthree-mock-node {
-    background-color: #262626;
-    /* Тёмно-серый фон ноды */
-    border-radius: 6px;
-    display: flex;
-    flex-direction: column;
+    background: rgba(0, 0, 0, 0.5) !important; /* Тёмное тело ноды */
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 8px !important;
+    margin-bottom: 12px !important;
     overflow: hidden;
-    margin-bottom: 12px;
-    border: 1px solid #000;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+    /* Плавность для всех изменений */
+    transition:
+        transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 0.25s ease,
+        background-color 0.2s ease,
+        filter 0.25s ease !important;
+
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 .rgthree-mock-node:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.6);
-    border-color: #444;
+    transform: scale(1.03) translateY(-2px) !important;
+    /* Увеличиваем и приподнимаем */
+    background: rgba(255, 255, 255, 0.08) !important;
+    /* Легкая подсветка */
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6) !important;
+    /* Явная глубокая тень */
+    z-index: 10;
+    /* Чтобы была поверх соседей */
 }
 
-/* Шапка ноды (цвет будет задаваться инлайн из JS) */
+#rgthree-primitive-import-menu:has(.rgthree-mock-node:hover) .rgthree-mock-node:not(:hover) {
+    transform: scale(0.98) !important;
+    /* Слегка уменьшаем остальные */
+    /*filter: blur(1px) brightness(0.7) !important;
+    /* Слегка приглушаем их */
+    opacity: 0.9;
+}
+
+/* Чтобы нода не светилась, когда наведен конкретный виджет */
+.rgthree-mock-node:has(.rgthree-mock-widget:hover) {
+    background: rgba(0, 0, 0, 0.6) !important;
+    /* Возвращаем темный фон */
+}
+
 .rgthree-mock-node-header {
-    padding: 6px 10px;
-    font-weight: bold;
-    font-size: 13px;
+    padding: 7px 10px;
+    /* font-weight: bold; */
+    font-size: 12px;
     color: #fff;
-    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
-    border-bottom: 1px solid #111;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     display: flex;
     justify-content: space-between;
+    cursor: pointer !important;
 }
 
+/* --- 4. ВИДЖЕТЫ --- */
 .rgthree-mock-node-body {
     padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
 }
 
-/* Виджеты внутри ноды */
 .rgthree-mock-widget {
-    background-color: #1a1a1a;
-    border: 1px solid #333;
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 4px;
-    padding: 5px 8px;
+    padding: 6px 10px;
     font-size: 11px;
-    color: #ddd;
+    color: #ccc;
     font-family: monospace;
     white-space: pre-wrap;
     word-break: break-all;
-    max-height: 80px;
-    overflow-y: auto;
-}
-
-.rgthree-mock-widget-empty {
-    color: #777;
-    font-style: italic;
-    text-align: center;
-    padding: 4px;
-}
-
-/* Блок с кнопками действий */
-.rgthree-mock-actions {
-    display: flex;
-    gap: 6px;
-    padding: 8px;
-    background-color: #222;
-    border-top: 1px solid #111;
-}
-
-.rgthree-mock-btn {
-    flex: 1;
-    padding: 6px;
-    background: #333;
-    color: #fff;
-    border: 1px solid #444;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: bold;
-    transition: background 0.2s, border-color 0.2s;
-}
-
-.rgthree-mock-btn:hover {
-    background: #444;
-    border-color: #666;
-}
-
-.rgthree-mock-btn-cancel {
-    width: 100%;
-    padding: 8px;
-    background: #1a1a1a;
-    color: #aaa;
-    border: 1px solid #333;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 12px;
-    margin-top: 4px;
-    transition: background 0.2s, color 0.2s;
-}
-
-.rgthree-mock-btn-cancel:hover {
-    background: #2a2a2a;
-    color: #fff;
-}
-
-
-/* Панель прокси-ноды для маппинга */
-#rgthree-mapping-proxy-panel {
-    position: fixed;
-    z-index: 100001;
-    width: 280px;
-    background-color: #1a1a1a;
-    border: 2px solid #4e3573;
-    /* Цвет модели для акцента */
-    border-radius: 8px;
-    padding: 12px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
-    display: none;
-    /* Управляется из JS */
-}
-
-.rgthree-proxy-slot {
-    background-color: #222;
-    border: 1px dashed #444;
-    border-radius: 4px;
-    padding: 8px;
-    margin-bottom: 6px;
-    font-size: 12px;
-    color: #888;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.2s;
-}
-
-.rgthree-proxy-slot:hover {
-    border-color: #aaa;
-    background-color: #2a2a2a;
-    color: #eee;
-}
-
-/* Состояние, когда в слот что-то "закинули" */
-.rgthree-proxy-slot.mapped {
-    border: 1px solid #2c5c41;
-    background-color: #1a251d;
-    color: #fff;
-    font-weight: bold;
-}
-
-/* Подсветка выбранного виджета в основном меню */
-.rgthree-mock-widget.selected {
-    border-color: #4e3573;
-    background-color: #251b33;
-    color: #fff;
-}
-
-.rgthree-mock-btn-apply {
-    width: 100%;
-    margin-top: 10px;
-    padding: 8px;
-    background: #2c5c41;
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    font-weight: bold;
-    cursor: pointer;
-}
-
-
-/* Улучшения виджетов в меню */
-.rgthree-mock-widget {
+    transition: all 0.1s ease !important;
     cursor: pointer !important;
-    /* Курсор-пальчик */
-    user-select: none !important;
-    /* Запрет выделения текста (убирает каретку) */
-    transition: background-color 0.1s, color 0.1s !important;
-}
-
-.rgthree-mock-widget:hover {
-    background-color: #333 !important;
-    /* Легкая подсветка фона */
-    color: #fff !important;
-    /* Текст становится ярче */
-    border-color: #555 !important;
-}
-
-/* Подсветка выбранного виджета, пока мы не кликнули в прокси-ноду */
-.rgthree-mock-widget.selected {
-    background-color: #4e3573 !important;
-    color: #fff !important;
-    border-color: #82366b !important;
-}
-
-/* Стили для прокси-панели (чтобы тоже был пальчик) */
-.rgthree-proxy-slot {
-    cursor: pointer !important;
-    user-select: none !important;
-}
-
-.rgthree-proxy-slot:hover {
-    background-color: #2a2a2a !important;
-    border-color: #666 !important;
-}
-
-.rgthree-mock-node-header,
-.rgthree-mock-widget,
-.rgthree-proxy-slot,
-.rgthree-mock-btn,
-.rgthree-mock-btn-cancel {
-    cursor: pointer !important;
-}
-
-/* Выделение ноды целиком */
-.rgthree-mock-node {
-    transition: background-color 0.15s, border-color 0.15s !important;
-}
-
-/* Подсветка ноды при наведении на тело или шапку */
-.rgthree-mock-node:hover {
-    border-color: #666 !important;
-    background-color: #2a2a2a !important;
-    /* Чуть светлее обычного фона */
-}
-
-/* Эффект взаимоисключения: когда мы на виджете, нода не должна "гореть" так ярко */
-.rgthree-mock-node:has(.rgthree-mock-widget:hover) {
-    background-color: #262626 !important;
-    /* Возвращаем к исходному */
-}
-
-/* Подсветка виджета */
-.rgthree-mock-widget:hover {
-    background-color: #3d3d3d !important;
-    color: #fff !important;
-    border-color: #777 !important;
-}
-
-/* Выделенный виджет (активный для маппинга) */
-.rgthree-mock-widget.selected {
-    background-color: #4e3573 !important;
-    color: #fff !important;
-}
-
-/* Основное меню с эффектом Acrylic */
-#rgthree-primitive-import-menu,
-#rgthree-mapping-proxy-panel {
-    background: rgba(25, 25, 25, 0.7) !important;
-    /* Полупрозрачный темный фон */
-    backdrop-filter: blur(12px) saturate(160%) !important;
-    /* Размытие заднего плана и сочность */
-    -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
-
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    /* Тонкая светлая граница */
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5) !important;
-    /* Мягкая глубокая тень */
-    border-radius: 12px !important;
-    padding: 10px !important;
-    z-index: 10000 !important;
-    position: fixed !important;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color: #eee;
-}
-
-/* Эффект свечения границ (необязательно, но добавляет "стеклянности") */
-#rgthree-primitive-import-menu::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border-radius: 12px;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
-}
-
-/* Заголовок меню */
-.rgthree-menu-title {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 10px;
-    color: rgba(255, 255, 255, 0.9);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding-bottom: 5px;
-}
-
-/* Стили нод внутри меню */
-.rgthree-mock-node {
-    background: rgba(255, 255, 255, 0.03) !important;
-    border: 1px solid rgba(255, 255, 255, 0.05) !important;
-    border-radius: 8px !important;
-    margin-bottom: 8px !important;
-    overflow: hidden;
-}
-
-/* Наведение на виджет (усиливаем контраст на фоне стекла) */
-.rgthree-mock-widget {
-    background: rgba(255, 255, 255, 0.02) !important;
-    transition: all 0.15s ease !important;
 }
 
 .rgthree-mock-widget:hover {
     background: rgba(255, 255, 255, 0.15) !important;
     color: #fff !important;
-    transform: translateX(2px);
-    /* Легкое смещение при наведении */
+    /* transform: translateX(3px); */
+    transform: scale(1.02);
+
 }
 
+/* ВЫДЕЛЕННЫЙ ВИДЖЕТ (ГОЛУБОЙ) */
 .rgthree-mock-widget.selected {
-    background: rgba(130, 54, 107, 0.6) !important;
-    /* Твой фиолетовый, но прозрачный */
-    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+    background: #2165e479 !important;
+    color: #fff !important;
+    border-color: rgba(100, 110, 255, 0.712) !important;
+    box-shadow: 0 0 15px rgba(0, 120, 212, 0.4) !important;
 }
 
-/* Прокси-слоты */
+/* --- 5. ПРОКСИ-ПАНЕЛЬ (ПРАВАЯ) --- */
+#rgthree-mapping-proxy-panel {
+    width: 280px;
+    display: none;
+}
+
 .rgthree-proxy-slot {
     background: rgba(255, 255, 255, 0.05) !important;
-    border-radius: 4px;
-    margin: 4px 0;
-    padding: 6px 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #aaa;
+    text-align: center;
+    transition: all 0.2s;
 }
 
 .rgthree-proxy-slot:hover {
+    background: rgba(0, 120, 212, 0.2) !important;
+    border-color: #0078d4;
+    color: #fff;
+    cursor: pointer !important;
+}
+
+.rgthree-proxy-slot.mapped {
+    border: 1px solid #2c5c41 !important;
+    background: rgba(44, 92, 65, 0.3) !important;
+    color: #00ff88 !important;
+    font-weight: bold;
+}
+
+/* --- 6. КНОПКИ --- */
+.rgthree-mock-btn-apply {
+    width: 100%;
+    margin-top: 10px;
+    padding: 10px;
+    background: #2c5c41 !important;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.rgthree-mock-btn-cancel {
+    width: 100%;
+    margin-top: 8px;
+    padding: 10px;
     background: rgba(255, 255, 255, 0.1) !important;
+    color: #ccc;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.rgthree-mock-btn-apply:hover,
+.rgthree-mock-btn-cancel:hover {
+    filter: brightness(1.2);
 }
