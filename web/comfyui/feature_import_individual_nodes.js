@@ -608,37 +608,22 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             // Достаем данные из promptData Map
             let nodeInPrompt = graphCtx.promptData.get(node.id) ?? [];
 
-            // if (graphCtx?.promptData instanceof Map) {
-            //     for (let [fullId, data] of graphCtx.promptData) {
-            //         if (normalizeId(fullId) === nodeIdNorm) {
-            //             nodeInPrompt = data;
-            //             break;
-            //         }
-            //     }
-            // }
-
             const promptInputs = nodeInPrompt?.inputs || {};
             const workflowInputsByName = new Map(node.inputs.map(i => [i.name, i]));
-            const values = node.widgets_values || [];
             const widgetInputs = Object.entries(promptInputs).reduce((acc, [name, value]) => {
                 const wfInput = workflowInputsByName.get(name);
-
-                // Обычный widget
-                if (!Array.isArray(value)) {
+                if (!Array.isArray(value) && typeof value !== "object") {
                     acc.push({
                         name,
                         value
                     });
                 }
-
-                // Widget с линкой
                 else if (wfInput?.widget) {
                     acc.push({
                         name,
                         value: findWidgetValue(value, graphCtx),
                     });
                 }
-
                 return acc;
             }, []);
             for (const input of widgetInputs) {
@@ -661,7 +646,8 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                     typeClass = "type-string";
                 }
 
-                widgetLine.innerHTML = `<span class="widget-label">${widgetName}:</span> <span class="widget-value ${typeClass}">${preview}</span>`;
+                widgetLine.innerHTML = `<span class="widget-label">${widgetName}:</span> <span class="widget-value ${typeClass}"></span>`;
+                widgetLine.querySelector(".widget-value").textContent = preview;
 
                 widgetLine.onclick = (evt) => {
                     evt.stopPropagation();
@@ -738,13 +724,19 @@ function applyCandidateToNode(targetNode, result) {
     const sourceNode = result.node || (result.widgets_values ? result : null);
     let next = [...(targetNode.widgets_values || [])];
 
-    if (isManual && result.mapping) {
+    if (isManual) {
         for (const [idx, value] of Object.entries(result.mapping)) {
-            next[parseInt(idx)] = value;
+            const widget = targetNode.widgets?.[Number(idx)];
+            if (!widget) continue;
+            widget.value = value;
+            widget.callback?.(value);
         }
+        targetNode.setDirtyCanvas?.(true, true);
+        return;
     }
     else if (sourceNode) {
         const incoming = sourceNode.widgets_values || [];
+
         for (let i = 0; i < incoming.length; i++) {
             if (Array.isArray(next[i]) && Array.isArray(incoming[i])) {
                 next[i] = [...incoming[i]];
