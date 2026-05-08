@@ -68,6 +68,7 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.15);
     padding-bottom: 6px;
     flex-shrink: 0 !important;
+    user-select: none;
 }
 
 #rgthree-primitive-import-menu::-webkit-scrollbar {
@@ -208,30 +209,6 @@
 }
 
 /* --- 6. КНОПКИ --- */
-.rgthree-mock-btn-apply {
-    width: 100%;
-    margin-top: 10px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.05) !important;
-    color: #999 !important;
-    border: rgba(255, 255, 255, 0.1) !important;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: opacity 0.2s;
-    transition: all 0.2s ease !important;
-    flex-shrink: 0 !important;
-    box-sizing: border-box !important;
-}
-
-.rgthree-mock-btn-apply:hover {
-    background: rgba(46, 204, 113, 0.15) !important;
-    color: #2ecc71 !important;
-    border-color: rgba(46, 204, 113, 0.4) !important;
-    box-shadow: 0 0 15px rgba(46, 204, 113, 0.15) !important;
-    transform: translateY(-1px) !important;
-}
-
 .rgthree-mock-btn-cancel,
 .rgthree-mock-btn-apply {
     width: 100%;
@@ -248,6 +225,18 @@
     transition: all 0.2s ease !important;
     flex-shrink: 0 !important;
     box-sizing: border-box !important;
+}
+
+.rgthree-mock-btn-apply {
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.rgthree-mock-btn-apply:hover {
+    background: rgba(46, 204, 113, 0.15) !important;
+    color: #2ecc71 !important;
+    border-color: rgba(46, 204, 113, 0.4) !important;
+    box-shadow: 0 0 15px rgba(46, 204, 113, 0.15) !important;
+    transform: translateY(-1px) !important;
 }
 
 .rgthree-mock-btn-cancel:hover {

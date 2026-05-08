@@ -112,6 +112,17 @@ function buildGraphCtx(workflow, prompt) {
     }
 }
 
+function findWidgetValue(linkedValue, graphCtx) {
+    const inputs =
+        graphCtx.promptData.get(linkedValue[0])?.inputs ??
+        graphCtx.promptData.get(Number(linkedValue[0]))?.inputs;
+    if (!inputs) return null;
+    const value = Object.entries(inputs)[linkedValue[1]]?.[1];
+    return Array.isArray(value)
+        ? findWidgetValue(value, graphCtx)
+        : value;
+}
+
 function enterSub(link, graphCtx) {
     const subNode = graphCtx.subsProxyNodesById.get(link.target_id);
     const sub = graphCtx.subsById.get(subNode.type);
@@ -375,9 +386,9 @@ function getNodeRole(node, graphCtx, options = {}) {
     if (!allowNoLinks && !hasOutLinks) return "unknown";
     if (!allowEmptyWidgets && !hasWidgetsStrings) return "unknown";
 
-    if (widgetValues.hasModel) score.model += 1;
+    if (widgetValues.hasModel) { score.model += 1 } else score.model -= 1;
     if (downstream.reachesModel) score.model += 1;
-    if (nodeHasAnyKeyword(["checkpoint", "ckpt", "model"], title, type, ...outStrings)) score.model += 1;
+    if (nodeHasAnyKeyword(["checkpoint", "ckpt", "model"], title, type, ...outStrings)) { score.model += 1 } else score.model -= 1;
 
     if (widgetValues.hasLora) score.lora += 1;
     if (downstream.reachesModel) score.lora += 1;
@@ -480,7 +491,6 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             isDragging = true;
             offsetX = e.clientX - overlay.offsetLeft;
             offsetY = e.clientY - overlay.offsetTop;
-            title.style.background = "rgba(255, 255, 255, 0.1)"; // Визуальный отклик
         };
 
         window.addEventListener("mousemove", (e) => {
@@ -507,8 +517,14 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         // Функция нормализации ID для сабграфов ("123:456" -> "456")
         const normalizeId = (id) => {
             if (id === undefined || id === null) return null;
-            const s = String(id);
-            return s.includes(":") ? s.split(":").pop() : s;
+
+            if (typeof id !== "string") {
+                return id;
+            }
+
+            return id.includes(":")
+                ? id.split(":").pop()
+                : id;
         };
 
         const targetIdNorm = normalizeId(targetNode.id);
@@ -552,7 +568,6 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 evt.stopImmediatePropagation();
             }
 
-            // Вызываем нашу новую чистку
             if (overlay._cleanup) overlay._cleanup();
 
             overlay.remove();
@@ -591,35 +606,46 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             };
 
             // Достаем данные из promptData Map
-            let nodeInPrompt = null;
-            const nodeIdNorm = normalizeId(node.id);
+            let nodeInPrompt = graphCtx.promptData.get(node.id) ?? [];
 
-            if (graphCtx?.promptData instanceof Map) {
-                for (let [fullId, data] of graphCtx.promptData) {
-                    if (normalizeId(fullId) === nodeIdNorm) {
-                        nodeInPrompt = data;
-                        break;
-                    }
-                }
-            }
+            // if (graphCtx?.promptData instanceof Map) {
+            //     for (let [fullId, data] of graphCtx.promptData) {
+            //         if (normalizeId(fullId) === nodeIdNorm) {
+            //             nodeInPrompt = data;
+            //             break;
+            //         }
+            //     }
+            // }
 
             const promptInputs = nodeInPrompt?.inputs || {};
+            const workflowInputsByName = new Map(node.inputs.map(i => [i.name, i]));
             const values = node.widgets_values || [];
+            const widgetInputs = Object.entries(promptInputs).reduce((acc, [name, value]) => {
+                const wfInput = workflowInputsByName.get(name);
 
-            for (let i = 0; i < values.length; i++) {
-                const val = values[i];
+                // Обычный widget
+                if (!Array.isArray(value)) {
+                    acc.push({
+                        name,
+                        value
+                    });
+                }
+
+                // Widget с линкой
+                else if (wfInput?.widget) {
+                    acc.push({
+                        name,
+                        value: findWidgetValue(value, graphCtx),
+                    });
+                }
+
+                return acc;
+            }, []);
+            for (const input of widgetInputs) {
+                const val = input.value;
                 if (val === undefined || val === null || String(val).trim() === "") continue;
 
-                // Матчинг имени
-                let widgetName = Object.keys(promptInputs).find(key => {
-                    const inputVal = promptInputs[key];
-                    if (Array.isArray(inputVal)) return false;
-                    // Сравнение для int, float и string
-                    if (typeof inputVal === 'number' && typeof val === 'number') return inputVal === val;
-                    return String(inputVal) === String(val);
-                });
-
-                if (!widgetName) widgetName = `widgtet[${i}]`;
+                let widgetName = input.name ?? "Widget";
 
                 const text = String(val).trim();
                 if (text === "" && !Array.isArray(val)) continue;
@@ -628,12 +654,11 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 const widgetLine = document.createElement("div");
                 widgetLine.className = "rgthree-mock-widget";
 
-                // Определяем класс в зависимости от типа данных
                 let typeClass = "";
                 if (typeof val === 'number') {
-                    typeClass = "type-number"; // Для int и float
+                    typeClass = "type-number";
                 } else if (typeof val === 'string') {
-                    typeClass = "type-string"; // Для строк
+                    typeClass = "type-string";
                 }
 
                 widgetLine.innerHTML = `<span class="widget-label">${widgetName}:</span> <span class="widget-value ${typeClass}">${preview}</span>`;
