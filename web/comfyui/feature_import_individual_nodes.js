@@ -544,12 +544,21 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             slot.className = "rgthree-proxy-slot";
             slot.textContent = w.name || `Widget ${idx}`;
             slot.onclick = () => {
+                if (mapping[idx] !== undefined) {
+                    delete mapping[idx];
+                    slot.classList.remove("mapped");
+                    slot.textContent = w.name || `Widget ${idx}`;
+                    return;
+                }
                 if (selectedValue !== null) {
                     mapping[idx] = selectedValue;
                     slot.classList.add("mapped");
                     slot.textContent = `✓ ${w.name || idx}`;
                     selectedValue = null;
-                    if (selectedWidgetEl) selectedWidgetEl.classList.remove("selected");
+                    if (selectedWidgetEl) {
+                        selectedWidgetEl.classList.remove("selected");
+                        selectedWidgetEl = null;
+                    }
                 }
             };
             proxyPanel.appendChild(slot);
@@ -651,10 +660,12 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 
                 widgetLine.onclick = (evt) => {
                     evt.stopPropagation();
-                    overlay.querySelectorAll('.rgthree-mock-widget').forEach(el => el.classList.remove('selected'));
+                    if (selectedWidgetEl) {
+                        selectedWidgetEl.classList.remove('selected');
+                    }
                     widgetLine.classList.add("selected");
+                    selectedWidgetEl = widgetLine;
                     selectedValue = val;
-
                     const menuRect = overlay.getBoundingClientRect();
                     proxyPanel.style.display = "block";
                     proxyPanel.style.left = `${menuRect.right + 20}px`;
