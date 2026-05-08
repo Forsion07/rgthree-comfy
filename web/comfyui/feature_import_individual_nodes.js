@@ -496,7 +496,7 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         });
 
         const ROLE_COLORS = {
-            latent: "#82366b", model: "#4e3573", lora: "#2c5c41",
+            latent: "#82366b", model: "#4e3573", lora: "#2C8E66",
             positive: "#386641", negative: "#732c2c", samplerParams: "#907130",
             prompt: "#733e2c", unknown: "#333333"
         };
