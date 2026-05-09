@@ -542,22 +542,25 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         (targetNode.widgets || []).forEach((w, idx) => {
             const slot = document.createElement("div");
             slot.className = "rgthree-proxy-slot";
-            slot.textContent = w.name || `Widget ${idx}`;
+            slot.innerHTML = `<span class="slot-name">${w.name || `Widget ${idx}`}</span> <span class="slot-value"></span>`;
+            const valueSpan = slot.querySelector(".slot-value");
             slot.onclick = () => {
                 if (mapping[idx] !== undefined) {
                     delete mapping[idx];
                     slot.classList.remove("mapped");
-                    slot.textContent = w.name || `Widget ${idx}`;
+                    valueSpan.textContent = "";
                     return;
                 }
-                if (selectedValue !== null) {
+                if (selectedValue !== null && selectedWidgetEl) {
                     mapping[idx] = selectedValue;
                     slot.classList.add("mapped");
-                    slot.textContent = `✓ ${w.name || idx}`;
-                    selectedValue = null;
+                    let valText = String(selectedValue);
+                    if (typeof selectedValue === 'object') valText = "[Object]";
+                    valueSpan.textContent = valText.length > 25 ? ` → ${valText.slice(0, 25)}...` : ` → ${valText}`;
                     if (selectedWidgetEl) {
                         selectedWidgetEl.classList.remove("selected");
                         selectedWidgetEl = null;
+                        selectedValue = null;
                     }
                 }
             };

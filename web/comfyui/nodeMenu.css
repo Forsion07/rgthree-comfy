@@ -214,8 +214,17 @@
     /* При наведении подсветим красным */
     border-color: rgba(231, 76, 60, 0.5) !important;
     color: #ff4d4d !important;
-    text-decoration: line-through;
     /* Визуально показываем отмену */
+}
+
+.rgthree-proxy-slot.mapped:hover .slot-value {
+    color: #ff4d4d;
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+.rgthree-proxy-slot.mapped:hover .slot-name {
+    opacity: 0.8;
+    /* Имя просто чуть притихает, но не зачеркивается */
 }
 
 /* --- 6. КНОПКИ --- */
