@@ -477,10 +477,9 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         overlay.style.left = `${Math.max(8, left)}px`;
         overlay.style.top = `${Math.max(8, top)}px`;
 
-        // --- ЛОГИКА ПЕРЕТАСКИВАНИЯ (DRAG) ---
         const title = document.createElement("div");
         title.className = "rgthree-menu-title";
-        title.style.cursor = "move"; // Показываем, что можно тащить
+        title.style.cursor = "move";
         title.textContent = "::: Select node to import values from";
         overlay.appendChild(title);
 
@@ -513,8 +512,23 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
         let selectedValue = null;
         let selectedWidgetEl = null;
         const mapping = {};
+        const triggerFlash = (el) => {
+            if (!el) return;
+            el.classList.remove("flash-apply");
+            void el.offsetWidth;
+            el.classList.add("flash-apply");
+            setTimeout(() => el.classList.remove("flash-apply"), 450);
+        };
+        const preventImmediateHover = (slotEl) => {
+            slotEl.classList.add("no-hover");
+            const removeBlock = () => {
+                slotEl.classList.remove("no-hover");
+                slotEl.removeEventListener("mouseleave", removeBlock);
+            };
+            slotEl.addEventListener("mouseleave", removeBlock);
+            setTimeout(removeBlock, 800);
+        };
 
-        // Функция нормализации ID для сабграфов ("123:456" -> "456")
         const normalizeId = (id) => {
             if (id === undefined || id === null) return null;
 
@@ -529,21 +543,22 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 
         const targetIdNorm = normalizeId(targetNode.id);
 
-        // Панель прокси-ноды (целевой)
         const proxyPanel = document.createElement("div");
         proxyPanel.id = "rgthree-mapping-proxy-panel";
         proxyPanel.style.display = "none";
 
         const proxyTitle = document.createElement("div");
         proxyTitle.className = "rgthree-menu-title";
-        proxyTitle.textContent = `Mapping to: ${targetNode.type} (ID: ${targetIdNorm})`;
+        proxyTitle.textContent = `Mapping to: ${targetNode.type} (ID: ${targetNode.id})`;
         proxyPanel.appendChild(proxyTitle);
+        const proxySlotsElements = [];
 
         (targetNode.widgets || []).forEach((w, idx) => {
             const slot = document.createElement("div");
             slot.className = "rgthree-proxy-slot";
             slot.innerHTML = `<span class="slot-name">${w.name || `Widget ${idx}`}</span> <span class="slot-value"></span>`;
             const valueSpan = slot.querySelector(".slot-value");
+            proxySlotsElements[idx] = { slot, valueSpan };
             slot.onclick = () => {
                 if (mapping[idx] !== undefined) {
                     delete mapping[idx];
@@ -554,9 +569,12 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 if (selectedValue !== null && selectedWidgetEl) {
                     mapping[idx] = selectedValue;
                     slot.classList.add("mapped");
+                    preventImmediateHover(slot);
                     let valText = String(selectedValue);
                     if (typeof selectedValue === 'object') valText = "[Object]";
                     valueSpan.textContent = valText.length > 25 ? ` → ${valText.slice(0, 25)}...` : ` → ${valText}`;
+                    triggerFlash(selectedWidgetEl.querySelector(".widget-value"));
+                    triggerFlash(slot);
                     if (selectedWidgetEl) {
                         selectedWidgetEl.classList.remove("selected");
                         selectedWidgetEl = null;
@@ -579,26 +597,16 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 evt.stopPropagation();
                 evt.stopImmediatePropagation();
             }
-
             if (overlay._cleanup) overlay._cleanup();
-
             overlay.remove();
             proxyPanel.remove();
             resolve(selectedResult || { action: "cancelled" });
-        };
-
-        const onOutsideClick = (e) => {
-            if (!overlay.contains(e.target) && !proxyPanel.contains(e.target)) closeMenu(null, e);
-        };
-        const onKeydown = (e) => {
-            if (e.key === "Escape") closeMenu(null, e);
         };
 
         const scrollBox = document.createElement("div");
         scrollBox.className = "rgthree-mock-node-container";
         overlay.appendChild(scrollBox);
 
-        // Отрисовка кандидатов
         for (const { node, role, score } of candidates) {
             const container = document.createElement("div");
             container.className = "rgthree-mock-node";
@@ -607,7 +615,7 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
             header.className = "rgthree-mock-node-header";
             header.style.backgroundColor = ROLE_COLORS[role] || ROLE_COLORS.unknown;
             const label = (typeof toNodeLabel === 'function') ? toNodeLabel(node) : (node.type || 'Node');
-            header.textContent = `${label} [${role}]-${score}`;
+            header.textContent = label;
             header.onclick = (e) => closeMenu({ node, action: "direct" }, e);
             container.appendChild(header);
 
@@ -617,7 +625,6 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
                 if (e.target === body) closeMenu({ node, action: "direct" }, e);
             };
 
-            // Достаем данные из promptData Map
             let nodeInPrompt = graphCtx.promptData.get(node.id) ?? [];
 
             const promptInputs = nodeInPrompt?.inputs || {};
@@ -663,12 +670,36 @@ async function chooseNodeFromCandidates(candidates, targetNode, e, graphCtx) {
 
                 widgetLine.onclick = (evt) => {
                     evt.stopPropagation();
-                    if (selectedWidgetEl) {
-                        selectedWidgetEl.classList.remove('selected');
+                    if (targetNode.widgets && targetNode.widgets.length === 1) {
+                        closeMenu({ action: "manual", mapping: { 0: val } }, evt);
+                        return;
                     }
-                    widgetLine.classList.add("selected");
-                    selectedWidgetEl = widgetLine;
-                    selectedValue = val;
+                    const matchIdx = (targetNode.widgets || []).findIndex(w => w.name === widgetName);
+                    if (matchIdx !== -1) {
+                        mapping[matchIdx] = val;
+                        const pSlot = proxySlotsElements[matchIdx];
+                        if (pSlot) {
+                            pSlot.slot.classList.add("mapped");
+                            let valText = String(val);
+                            if (typeof val === 'object') valText = "[Object]";
+                            pSlot.valueSpan.textContent = valText.length > 25 ? ` → ${valText.slice(0, 25)}...` : ` → ${valText}`;
+                            preventImmediateHover(pSlot.slot);
+                            triggerFlash(widgetLine.querySelector(".widget-value"));
+                            triggerFlash(pSlot.slot);
+                        }
+                        if (selectedWidgetEl) {
+                            selectedWidgetEl.classList.remove('selected');
+                            selectedWidgetEl = null;
+                            selectedValue = null;
+                        }
+                    } else {
+                        if (selectedWidgetEl) {
+                            selectedWidgetEl.classList.remove('selected');
+                        }
+                        widgetLine.classList.add("selected");
+                        selectedWidgetEl = widgetLine;
+                        selectedValue = val;
+                    }
                     const menuRect = overlay.getBoundingClientRect();
                     proxyPanel.style.display = "block";
                     proxyPanel.style.left = `${menuRect.right + 20}px`;
